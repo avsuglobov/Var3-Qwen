@@ -6,13 +6,15 @@ import { ACTIVITY, CHANNELS, FUNNELS, STAGES } from "@/lib/mock-data/reference";
 import { SEED_DATA } from "@/lib/mock-data/seed";
 import { CHANNEL_IDS, COLLECTION_NAMES, ID_RE, agentSchema, certificateSchema, courseSchema, leadSchema, parseCollection } from "@/lib/schemas";
 import { ROOT } from "./helpers";
+import { applyAINaming } from "../scripts/ai-naming.mjs";
 
 function loadPrototypeData(): Record<string, unknown> {
   const src = fs.readFileSync(path.join(ROOT, "..", "download", "data.js"), "utf8");
   const win: Record<string, unknown> = { AIWS: { config: { APP_NAME: "AI Workspace", APP_TAGLINE: "x", APP_TAGLINE_SHORT: "x" } } };
   win["window"] = win;
   vm.runInNewContext(src, win);
-  return (win["AIWS"] as { data: Record<string, unknown> }).data;
+  // С этапа 3 названия сотрудников переименовываются «ИИ-» → «AI-» тем же правилом, что и в генераторе сида.
+  return applyAINaming((win["AIWS"] as { data: Record<string, unknown> }).data) as Record<string, unknown>;
 }
 
 describe("демо-данные ↔ прототип", () => {
@@ -26,6 +28,21 @@ describe("демо-данные ↔ прототип", () => {
   });
   it("каналы справочника = допустимые id каналов в схемах", () => {
     expect(Object.keys(CHANNELS).sort()).toEqual([...CHANNEL_IDS].sort());
+  });
+});
+
+describe("названия сотрудников: приставка «AI-» вместо «ИИ-» (требование этапа 3)", () => {
+  it("в сидах нет «ИИ-», ссылки на сотрудников начинаются с «AI-»", () => {
+    expect(JSON.stringify(SEED_DATA)).not.toContain("ИИ-");
+    const assignees = [...SEED_DATA.TASKS.map((t) => t.assignee), ...SEED_DATA.CALENDAR_EVENTS.map((e) => e.assignee)];
+    for (const a of assignees) {
+      if (a && /РОП|Продажи|Снабжение/.test(a)) expect(a.startsWith("AI-"), a).toBe(true);
+    }
+  });
+  it("шаг онбординга и уведомление используют «AI-»", () => {
+    expect(SEED_DATA.ONBOARDING.find((s) => s.id === "agent")?.name).toBe("AI-сотрудник");
+    expect(SEED_DATA.NOTIFICATIONS.some((n) => n.text.startsWith("AI-Снабжение"))).toBe(true);
+    expect(SEED_DATA.TASKS.some((t) => t.title.includes("«AI-Продажи»"))).toBe(true);
   });
 });
 
