@@ -2,7 +2,7 @@
   "name": "ai-workspace",
   "version": "1.0.0",
   "private": true,
-  "description": "AI Workspace — статический прототип личного кабинета ИИ-сотрудников",
+  "description": "AI Workspace — статический прототип личного кабинета AI-сотрудников",
   "scripts": {
     "serve": "npx --yes serve download",
     "render:check": "node scripts/render_check.js",

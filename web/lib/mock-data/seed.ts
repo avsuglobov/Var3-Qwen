@@ -296,7 +296,7 @@ export const SEED_DATA: DbSnapshot = {
     },
     {
       "id": "agent",
-      "name": "ИИ-сотрудник",
+      "name": "AI-сотрудник",
       "done": true
     },
     {
@@ -327,7 +327,7 @@ export const SEED_DATA: DbSnapshot = {
       "done": false,
       "priority": "high",
       "due": "2026-11-16",
-      "assignee": "ИИ-Продажи",
+      "assignee": "AI-Продажи",
       "tag": "Документы"
     },
     {
@@ -354,7 +354,7 @@ export const SEED_DATA: DbSnapshot = {
       "done": false,
       "priority": "med",
       "due": "2026-11-18",
-      "assignee": "ИИ-Снабжение",
+      "assignee": "AI-Снабжение",
       "tag": "Снабжение"
     },
     {
@@ -363,12 +363,12 @@ export const SEED_DATA: DbSnapshot = {
       "done": true,
       "priority": "low",
       "due": "2026-11-13",
-      "assignee": "ИИ-РОП",
+      "assignee": "AI-РОП",
       "tag": "Диалоги"
     },
     {
       "id": "TK-6",
-      "title": "Обновить инструкцию агента «ИИ-Продажи»",
+      "title": "Обновить инструкцию агента «AI-Продажи»",
       "done": false,
       "priority": "low",
       "due": "2026-11-20",
@@ -384,7 +384,7 @@ export const SEED_DATA: DbSnapshot = {
       "time": "10:00",
       "duration": "45 мин",
       "type": "call",
-      "assignee": "ИИ-Продажи"
+      "assignee": "AI-Продажи"
     },
     {
       "id": "EV-2",
@@ -420,7 +420,7 @@ export const SEED_DATA: DbSnapshot = {
       "time": "15:00",
       "duration": "45 мин",
       "type": "call",
-      "assignee": "ИИ-Продажи"
+      "assignee": "AI-Продажи"
     }
   ],
   "NOTIFICATIONS": [
@@ -448,7 +448,7 @@ export const SEED_DATA: DbSnapshot = {
     {
       "id": "NT-4",
       "type": "system",
-      "text": "ИИ-Снабжение собрал 3 предложения от поставщиков",
+      "text": "AI-Снабжение собрал 3 предложения от поставщиков",
       "time": "1 ч назад",
       "read": true
     },
