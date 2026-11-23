@@ -35,7 +35,7 @@ export function KpiSection() {
     <div className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <KpiCard label="Лиды за период" value={k.leads} icon={Users} hint={`В базе сейчас: ${k.leads}`} emptyHint="Лиды появятся после подключения каналов" />
       <KpiCard label="Созданные счета" value={k.documents} icon={FileText} hint="ИИ готовит по шаблону" emptyHint="Счета появятся, когда ИИ подготовит первый документ" />
-      <KpiCard label="Сообщения от ИИ" value={k.aiMessages} icon={MessageSquare} hint="Ответы из базы знаний" emptyHint="Подключите канал и включите ИИ-сотрудника" />
+      <KpiCard label="Сообщения от ИИ" value={k.aiMessages} icon={MessageSquare} hint="Ответы из базы знаний" emptyHint="Подключите канал и включите AI-сотрудника" />
       <KpiCard
         label="Передано менеджеру"
         value={k.handedOff}

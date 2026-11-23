@@ -29,7 +29,7 @@ export function ActivityCard() {
         ) : q.isError ? (
           <ErrorState message={q.error.message} onRetry={() => void q.refetch()} />
         ) : !hasData ? (
-          <EmptyState title="Пока нет активности" hint="График появится, когда ИИ-сотрудники начнут отвечать клиентам." />
+          <EmptyState title="Пока нет активности" hint="График появится, когда AI-сотрудники начнут отвечать клиентам." />
         ) : (
           <ActivityChart data={q.data} />
         )}

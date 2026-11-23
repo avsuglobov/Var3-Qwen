@@ -1,7 +1,7 @@
 import { APP_NAME, APP_TAGLINE_SHORT } from "@/lib/config";
 import { cn } from "@/lib/utils";
 
-/** Слова с дефисом не переносим по дефису («ИИ-сотрудников» — одним куском). */
+/** Слова с дефисом не переносим по дефису («AI-сотрудников» — одним куском). */
 function NoHyphenBreak({ text }: { text: string }) {
   return (
     <>

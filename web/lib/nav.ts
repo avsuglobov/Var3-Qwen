@@ -37,8 +37,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     label: "Основное",
     items: [
-      { id: "overview", label: "Обзор", description: "Сводка по работе ИИ-сотрудников и текущая активность", icon: LayoutDashboard, stage: 2 },
-      { id: "agents", label: "ИИ-сотрудники", description: "Команда ИИ-сотрудников, мастер создания и тест-чат", icon: Bot, stage: 3 },
+      { id: "overview", label: "Обзор", description: "Сводка по работе AI-сотрудников и текущая активность", icon: LayoutDashboard, stage: 2 },
+      { id: "agents", label: "AI-сотрудники", description: "Команда AI-сотрудников, мастер создания и тест-чат", icon: Bot, stage: 3 },
       { id: "dialogs", label: "Диалоги", description: "Единый inbox: переписка, режим «Человек + ИИ», контекст клиента", icon: MessagesSquare, stage: 4 },
       { id: "crm", label: "CRM", description: "Воронки сделок и работа с лидами: журнал, канбан, таблица", icon: Columns3, stage: 5 }
     ]
@@ -61,7 +61,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "Знания и автоматизация",
     items: [
       { id: "storage", label: "Хранилище и база знаний", description: "Описание компании и источники знаний", icon: Database, stage: 6 },
-      { id: "team", label: "Команда", description: "Цепочки ИИ-сотрудников", icon: GitBranch, stage: 7 },
+      { id: "team", label: "Команда", description: "Цепочки AI-сотрудников", icon: GitBranch, stage: 7 },
       { id: "supply", label: "Снабжение", description: "Запросы поставщикам и сводная таблица условий", icon: Truck, stage: 7 },
       { id: "training", label: "Обучение", description: "Программы, тесты и сертификаты", icon: GraduationCap, stage: 7 },
       { id: "analytics", label: "Аналитика", description: "Разбор диалогов менеджеров и качество цепочки", icon: BarChart3, stage: 7 }
