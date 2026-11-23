@@ -1,4 +1,5 @@
-/* Сгенерировано scripts/gen-seed.mjs из ../download/data.js — не править вручную. Все записи помечены в интерфейсе как «Демо». */
+/* Сгенерировано scripts/gen-seed.mjs из ../download/data.js — не править вручную. Все записи помечены в интерфейсе как «Демо».
+   Названия сотрудников — с приставкой «AI-» вместо «ИИ-» (правило scripts/ai-naming.mjs, этап 3). */
 import type { DbSnapshot } from "@/lib/schemas";
 
 export const SEED_DATA: DbSnapshot = {
