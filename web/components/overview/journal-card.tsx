@@ -24,7 +24,7 @@ export function JournalCard() {
         ) : q.isError ? (
           <ErrorState message={q.error.message} onRetry={() => void q.refetch()} />
         ) : rows.length === 0 ? (
-          <EmptyState title="Событий пока нет" hint="Здесь появятся действия ИИ-сотрудников и менеджеров." />
+          <EmptyState title="Событий пока нет" hint="Здесь появятся действия AI-сотрудников и менеджеров." />
         ) : (
           <ul className="divide-y divide-border">
             {rows.map((r, i) => (

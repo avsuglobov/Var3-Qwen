@@ -17,7 +17,7 @@ export function OverviewView() {
       <header className="flex min-w-0 flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-[28px] leading-tight">Обзор</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Сводка по работе ИИ-сотрудников и текущая активность</p>
+          <p className="mt-1 text-sm text-muted-foreground">Сводка по работе AI-сотрудников и текущая активность</p>
         </div>
         <Button variant="secondary" onClick={() => void qc.invalidateQueries()} aria-busy={fetching}>
           <RefreshCw className={cn(fetching && "animate-spin")} aria-hidden />
