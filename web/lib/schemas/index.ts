@@ -1,0 +1,184 @@
+import { z } from "zod";
+
+/**
+ * Zod-схемы — единственный источник истины для форм данных. Правила перенесены из валидаторов прототипа (`../download/db.js`):
+ * безопасный формат id (id попадает в атрибуты и URL), допустимые значения полей, границы длин.
+ * Типы выводятся из схем (z.infer), поэтому код и валидация не расходятся.
+ */
+
+export const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+
+const id = z.string().regex(ID_RE, "Недопустимый id");
+const text = (max = 2000) => z.string().max(max);
+const optText = z.string().max(2000).nullish();
+
+export const CHANNEL_IDS = ["telegram", "whatsapp", "max", "vk", "avito", "email", "phone", "site"] as const;
+export const channelId = z.enum(CHANNEL_IDS);
+export const agentRole = z.enum(["sales", "support", "supply", "hr", "rop"]);
+export const agentStatus = z.enum(["online", "idle", "offline", "error"]);
+export const actor = z.enum(["ai", "human"]);
+export const conversationMode = z.enum(["ai", "human", "reading"]);
+
+/* ---------------------------------------------------------------- справочники (не меняются пользователем) */
+export const channelSchema = z.object({ id: channelId, name: text(100), icon: text(60) });
+export const stageSchema = z.object({ id: id, name: text(100), order: z.number().int().min(0) });
+export const funnelSchema = z.object({ id, name: text(100), agentId: id, stages: z.array(id) });
+export const activityPointSchema = z.object({ day: text(20), ai: z.number().min(0), human: z.number().min(0) });
+
+/* ---------------------------------------------------------------- сущности, которые сохраняются */
+export const leadEventSchema = z.object({
+  t: text(40),
+  /** Метка времени (мс): у демо-событий нет, новые события всегда выше демо-событий. */
+  ts: z.number().optional(),
+  actor,
+  text: text()
+});
+
+export const leadSchema = z.object({
+  id,
+  name: text(300),
+  channel: channelId,
+  stageId: id,
+  funnelId: id,
+  agentId: id,
+  value: z.number().nullish(),
+  lastActivity: optText,
+  note: optText,
+  events: z.array(leadEventSchema)
+});
+
+export const messageSchema = z.object({ from: z.enum(["client", "ai", "human"]), text: text(10000), time: optText });
+
+export const conversationSchema = z.object({
+  id,
+  contactName: text(300),
+  channel: channelId,
+  agentId: id,
+  mode: conversationMode,
+  unread: z.number().int().min(0).optional(),
+  lastPreview: optText,
+  lastTime: optText,
+  messages: z.array(messageSchema),
+  context: z.object({ who: text(), channel: text(), history: text(), nextStep: text(), files: z.number().finite() })
+});
+
+export const documentSchema = z.object({
+  id,
+  type: z.enum(["invoice", "offer", "act"]),
+  number: text(300),
+  client: text(300),
+  status: z.enum(["pending", "approved", "rejected"]),
+  approver: text(300),
+  created: optText,
+  /** Сумма в рублях; null — не задана (цены не выдумываем). */
+  amount: z.number().nullish()
+});
+
+export const onboardingStepSchema = z.object({ id, name: text(300), done: z.boolean() });
+
+export const taskSchema = z.object({
+  id, title: text(1000), done: z.boolean(), priority: z.enum(["high", "med", "low"]), due: optText, assignee: optText, tag: optText
+});
+
+export const calendarEventSchema = z.object({
+  id, title: text(1000), date: optText, time: optText, duration: optText, type: optText, assignee: optText
+});
+
+export const notificationSchema = z.object({ id, text: text(), time: optText, type: optText, read: z.boolean() });
+
+export const approvalRuleSchema = z.object({ action: text(300), mode: z.enum(["auto", "approve"]), note: text(500) });
+
+export const agentSchema = z.object({
+  id,
+  name: text(120),
+  role: agentRole,
+  status: agentStatus,
+  monogram: text(6),
+  summary: text(),
+  instruction: text(5000),
+  funnelId: id.nullable(),
+  channels: z.array(channelId),
+  knowledge: z.array(text(300)),
+  funnel: z.array(text(300)),
+  approvals: z.array(approvalRuleSchema)
+});
+
+export const courseSchema = z.object({
+  id, title: text(300), lessons: z.number().int().min(0).max(200), progress: z.number().min(0).max(1), status: text(60)
+});
+
+export const certificateSchema = z.object({
+  id, name: text(120), course: text(300), date: text(60), score: z.number().min(0).max(1).nullish()
+});
+
+/* ---------------------------------------------------------------- типы */
+export type Channel = z.infer<typeof channelSchema>;
+export type Stage = z.infer<typeof stageSchema>;
+export type Funnel = z.infer<typeof funnelSchema>;
+export type ActivityPoint = z.infer<typeof activityPointSchema>;
+export type LeadEvent = z.infer<typeof leadEventSchema>;
+export type Lead = z.infer<typeof leadSchema>;
+export type Message = z.infer<typeof messageSchema>;
+export type Conversation = z.infer<typeof conversationSchema>;
+export type Document = z.infer<typeof documentSchema>;
+export type OnboardingStep = z.infer<typeof onboardingStepSchema>;
+export type Task = z.infer<typeof taskSchema>;
+export type CalendarEvent = z.infer<typeof calendarEventSchema>;
+export type AppNotification = z.infer<typeof notificationSchema>;
+export type ApprovalRule = z.infer<typeof approvalRuleSchema>;
+export type Agent = z.infer<typeof agentSchema>;
+export type Course = z.infer<typeof courseSchema>;
+export type Certificate = z.infer<typeof certificateSchema>;
+
+/* ---------------------------------------------------------------- коллекции и снимок хранилища */
+export const COLLECTION_SCHEMAS = {
+  LEADS: leadSchema,
+  CONVERSATIONS: conversationSchema,
+  DOCUMENTS: documentSchema,
+  ONBOARDING: onboardingStepSchema,
+  TASKS: taskSchema,
+  CALENDAR_EVENTS: calendarEventSchema,
+  NOTIFICATIONS: notificationSchema,
+  AGENTS: agentSchema,
+  COURSES: courseSchema,
+  CERTIFICATES: certificateSchema
+} as const;
+
+export type CollectionName = keyof typeof COLLECTION_SCHEMAS;
+export const COLLECTION_NAMES = Object.keys(COLLECTION_SCHEMAS) as CollectionName[];
+
+export interface DbSnapshot {
+  LEADS: Lead[];
+  CONVERSATIONS: Conversation[];
+  DOCUMENTS: Document[];
+  ONBOARDING: OnboardingStep[];
+  TASKS: Task[];
+  CALENDAR_EVENTS: CalendarEvent[];
+  NOTIFICATIONS: AppNotification[];
+  AGENTS: Agent[];
+  COURSES: Course[];
+  CERTIFICATES: Certificate[];
+}
+
+export type ItemOf<K extends CollectionName> = DbSnapshot[K][number];
+
+/**
+ * Разбор коллекции из недоверенного источника (localStorage, импорт файла). Тот же алгоритм, что `pickValid` в прототипе:
+ * не массив → null; битые записи отбрасываются; дубли id отбрасываются; если во входе были записи, но ни одна не валидна → null.
+ */
+export function parseCollection<K extends CollectionName>(name: K, value: unknown): { items: ItemOf<K>[]; dropped: number } | null {
+  if (!Array.isArray(value)) return null;
+  const schema = COLLECTION_SCHEMAS[name];
+  const seen = new Set<string>();
+  const items: ItemOf<K>[] = [];
+  for (const raw of value) {
+    const r = schema.safeParse(raw);
+    if (!r.success) continue;
+    const item = r.data as ItemOf<K>;
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    items.push(item);
+  }
+  if (value.length > 0 && items.length === 0) return null;
+  return { items, dropped: value.length - items.length };
+}

@@ -1,0 +1,8 @@
+node_modules/
+.next/
+render-out/
+test-results/
+*.tsbuildinfo
+next-env.d.ts
+t*.js
+harness.js

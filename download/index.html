@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru" suppressHydrationWarning data-suppress-hydration-warning="true">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Workspace — платформа ИИ-сотрудников</title>
+  <meta name="description" content="Личный кабинет платформы ИИ-сотрудников для бизнеса со встроенной ИИ-CRM." />
+
+  <!-- No-flash theme init: emulates next-themes (class strategy, default=system).
+       Runs before first paint so the correct theme class is on <html> immediately,
+       which is what prevents both the flash and any hydration mismatch. -->
+  <script>
+    (function () {
+      try {
+        var key = "aiws-theme";
+        var stored = localStorage.getItem(key);
+        var mode = stored || "system";
+        var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        var eff = mode === "system" ? (prefersDark ? "dark" : "light") : mode;
+        var root = document.documentElement;
+        root.classList.toggle("dark", eff === "dark");
+        root.setAttribute("data-theme", eff);
+      } catch (e) {}
+    })();
+  </script>
+
+  <!-- Fonts via Google Fonts (next/font emulation: Fraunces/Geist/Geist Mono light,
+       Inter/JetBrains Mono dark; resolved through CSS variables per theme). -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Film grain layer — dark theme only (CSS hides it in light), disabled under
+       prefers-reduced-motion. Monochrome inline-SVG feTurbulence, aria-hidden. -->
+  <div class="grain" aria-hidden="true"></div>
+
+  <div id="app" class="app">
+    <!-- shell rendered by app.js -->
+    <noscript>Для работы приложения необходим включённый JavaScript.</noscript>
+  </div>
+
+  <!-- Static asset load order: icons → data → db(persist+CRUD) → core → sections -->
+  <script src="config.js"></script>
+  <script src="icons.js"></script>
+  <script src="data.js"></script>
+  <script src="db.js"></script>
+  <script src="app.js"></script>
+  <script src="sections.js"></script>
+  <script src="importer.js"></script>
+  <script src="sections2.js"></script>
+  <script src="sections3.js"></script>
+  <script src="pdf.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () { window.AIWS && window.AIWS.boot(); });
+  </script>
+</body>
+</html>

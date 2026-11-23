@@ -1,0 +1,31 @@
+{
+  "name": "ai-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Workspace — статический прототип личного кабинета ИИ-сотрудников",
+  "scripts": {
+    "serve": "npx --yes serve download",
+    "render:check": "node scripts/render_check.js",
+    "dom:check": "node scripts/dom_check.js",
+    "regress:data": "node scripts/regress_data.js",
+    "regress:docs": "node scripts/regress_docs.js",
+    "regress:render": "node scripts/regress_render.js",
+    "regress": "npm run regress:data && npm run regress:docs && npm run regress:render && npm run regress:ics && npm run regress:buttons && npm run regress:rest && npm run regress:import && npm run regress:learn",
+    "ics:check": "node scripts/ics_check.js",
+    "regress:ics": "node scripts/regress_ics.js",
+    "regress:buttons": "node scripts/regress_buttons.js",
+    "regress:rest": "node scripts/regress_rest.js",
+    "regress:import": "node scripts/regress_import.js",
+    "contrast:check": "node scripts/contrast_check.js",
+    "mobile:check": "node scripts/mobile_check.js",
+    "io:check": "node scripts/io_check.js",
+    "pdf:check": "node scripts/pdf_check.js",
+    "v2:check": "node scripts/v2_check.js",
+    "check:browser": "npm run render:check && npm run dom:check && npm run mobile:check && npm run io:check && npm run pdf:check && npm run v2:check && npm run ics:check && npm run contrast:check",
+    "regress:learn": "node scripts/regress_learn.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.57.0",
+    "jsdom": "^24.1.0"
+  }
+}

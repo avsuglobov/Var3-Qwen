@@ -1,0 +1,198 @@
+@import "tailwindcss";
+
+/* Тёмная тема — по классу `.dark` (next-themes, attribute="class"). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ==========================================================================
+   ТОКЕНЫ. Единственное место, где живут цвета, шрифты, радиусы, тени и плотность.
+   В компонентах цвета не хардкодятся: только токены (bg-card, text-muted-foreground, border-border …).
+   Имена совпадают с переменными shadcn/ui + свои: --elevated, --status, --critical, --font-*, --radius-*, --shadow-pop.
+   ========================================================================== */
+:root {
+  /* «Тёплая редакция» (светлая) */
+  --background: #FAF7F2;            /* canvas */
+  --card: #FFFFFF;                  /* surface */
+  --popover: #FFFFFF;
+  --foreground: #1A1A17;            /* text */
+  --muted: #F3EEE5;                 /* elevated */
+  --muted-foreground: #6B675F;      /* text-secondary */
+  --muted-foreground-strong: #6B675F; /* вторичный текст на приподнятых поверхностях */
+  --border: #E7E1D6;
+  --border-strong: #D8D1C2;
+  --input: #E7E1D6;
+  --ring: #B8431A;                  /* accent (терракота) */
+  --primary: #B8431A;
+  --primary-foreground: #FFFFFF;
+  --destructive: #B3261E;           /* critical */
+  --critical: #B3261E;
+  --on-critical: #FFFFFF;
+  --status: #1F5C4A;                /* в сети / ОК */
+  --elevated: #F3EEE5;
+  --accent-soft: rgba(184, 67, 26, 0.08);
+  --scrim: rgba(26, 26, 23, 0.40);
+  --lamp: transparent;
+
+  /* шрифты: заголовки — Fraunces (латиница) + Source Serif 4 (кириллица), интерфейс — Geist, данные — Geist Mono */
+  --font-heading: var(--font-fraunces), var(--font-serif-cyr), Georgia, "Times New Roman", serif;
+  --font-ui: var(--font-geist-latin), var(--font-geist-cyr), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: var(--font-geist-mono-latin), var(--font-geist-mono-cyr), ui-monospace, "SFMono-Regular", monospace;
+  --font-label: var(--font-ui);
+
+  /* радиусы: 8–12px (карточки 12px, кнопки 8px); пилюли только у чипов */
+  --radius-sm: 8px;
+  --radius-md: 8px;
+  --radius-card: 12px;
+  --radius-chip: 999px;
+
+  /* тени: почти без теней */
+  --shadow-pop: 0 8px 24px rgba(26, 26, 23, 0.12);
+
+  /* анимации: 200–300 мс, плавный ease-out */
+  --motion-fast: 200ms;
+  --motion-base: 280ms;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* раскладка */
+  --sidebar-w: 248px;
+  --sidebar-w-collapsed: 64px;
+  --topbar-h: 56px;
+  --content-max: 1480px;
+}
+
+.dark {
+  /* «Fincher Monitor» (тёмная): клинический, десатурированный */
+  --background: #0B0D0E;            /* canvas */
+  --card: #14171A;                  /* surface */
+  --popover: #14171A;
+  --foreground: #D8DEE4;            /* text */
+  --muted: #1E2226;                 /* elevated */
+  --muted-foreground: #7A858E;      /* text-secondary */
+  --muted-foreground-strong: #8A959E; /* на elevated #1E2226: 5.2:1 вместо 4.25:1 (AA) */
+  --border: #262B30;
+  --border-strong: #2F353B;
+  --input: #262B30;
+  --ring: #C88A36;                  /* accent (тунгстеновый янтарь) */
+  --primary: #C88A36;
+  --primary-foreground: #0B0D0E;
+  --destructive: #B8332A;           /* critical: заливка/граница/точка, не цвет мелкого текста */
+  --critical: #B8332A;
+  --on-critical: #FFFFFF;
+  --status: #3A6B5C;
+  --elevated: #1E2226;
+  --accent-soft: rgba(200, 138, 54, 0.10);
+  --scrim: rgba(0, 0, 0, 0.60);
+  --lamp: rgba(216, 222, 228, 0.03);
+
+  /* шрифты: интерфейс и заголовки — Inter, данные/время/ID/метки — JetBrains Mono */
+  --font-heading: var(--font-inter-latin), var(--font-inter-cyr), system-ui, -apple-system, sans-serif;
+  --font-ui: var(--font-inter-latin), var(--font-inter-cyr), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: var(--font-jetbrains-latin), var(--font-jetbrains-cyr), ui-monospace, "SFMono-Regular", monospace;
+  --font-label: var(--font-data);
+
+  /* радиусы: только 2px (кнопки, инпуты, чипы) и 4px (панели), сетка 8px */
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-card: 4px;
+  --radius-chip: 2px;
+
+  /* глубина — 1px границами; единственная тень у поповеров */
+  --shadow-pop: 0 4px 12px rgba(0, 0, 0, 0.7);
+
+  /* анимации: 150 мс, без bounce и spring */
+  --motion-fast: 150ms;
+  --motion-base: 150ms;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Привязка токенов к Tailwind. Дефолтная палитра отключена: цвет можно взять только из токенов. */
+@theme inline {
+  --color-*: initial;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted-foreground-strong: var(--muted-foreground-strong);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-critical: var(--critical);
+  --color-on-critical: var(--on-critical);
+  --color-status: var(--status);
+  --color-elevated: var(--elevated);
+  --color-accent-soft: var(--accent-soft);
+  --color-scrim: var(--scrim);
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-data);
+}
+
+@utility font-heading { font-family: var(--font-heading); }
+@utility font-data { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+@utility shadow-pop { box-shadow: var(--shadow-pop); }
+@utility rounded-card { border-radius: var(--radius-card); }
+@utility rounded-chip { border-radius: var(--radius-chip); }
+
+/* ---------------------------------------------------------------------------- базовые стили */
+@layer base {
+  html { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 { font-family: var(--font-heading); font-weight: 500; letter-spacing: -0.015em; }
+  .dark h1, .dark h2, .dark h3 { font-weight: 600; letter-spacing: -0.01em; }
+  /* видимый фокус, управление с клавиатуры */
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  /* иконки lucide: stroke 1.5, монохромные (цвет наследуется) */
+  svg.lucide { stroke-width: 1.5; }
+  ::selection { background: var(--accent-soft); }
+}
+
+/* Метка секции: в светлой — обычный регистр; в тёмной — моно, UPPERCASE, 10–11px, tracking .08em */
+.section-label { font-family: var(--font-label); font-size: 12px; color: var(--muted-foreground); }
+.dark .section-label { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; }
+.on-elevated { color: var(--muted-foreground-strong); }
+
+/* Плавность переходов — из токенов (тёмная 150 мс без bounce) */
+.transition-ui {
+  transition-property: background-color, border-color, color, opacity, width;
+  transition-duration: var(--motion-fast);
+  transition-timing-function: var(--ease);
+}
+.transition-width { transition: width var(--motion-base) var(--ease); }
+
+.skip-link { position: absolute; left: 8px; top: -48px; z-index: 100; padding: 8px 12px; background: var(--card); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--radius-sm); transition: top var(--motion-fast) var(--ease); }
+.skip-link:focus { top: 8px; }
+
+/* «Лампа» над рабочей областью и плёночное зерно — только в тёмной теме */
+.app-main { position: relative; isolation: isolate; }
+.dark .app-main::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: radial-gradient(ellipse 70% 40% at 50% 0%, var(--lamp), transparent 70%); }
+.grain { display: none; }
+.dark .grain {
+  display: block; position: fixed; inset: 0; z-index: 60; pointer-events: none; opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* prefers-reduced-motion: без анимаций и без зерна */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+  .grain, .dark .grain { display: none !important; }
+}
+
+/* Заголовки групп командной палитры — как метки секций */
+[cmdk-group-heading] { padding: 6px 8px; font-family: var(--font-label); font-size: 12px; color: var(--muted-foreground); }
+.dark [cmdk-group-heading] { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; }
