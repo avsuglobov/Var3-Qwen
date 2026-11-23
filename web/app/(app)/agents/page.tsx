@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { PagePlaceholder } from "@/components/layout/page-placeholder";
+import { AgentsView } from "@/components/agents/agents-view";
 
 export const metadata: Metadata = { title: "AI-сотрудники" };
 
 export default function Page() {
-  return <PagePlaceholder id="agents" />;
+  return <AgentsView />;
 }

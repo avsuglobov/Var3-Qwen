@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getApi } from "@/lib/api";
-import type { OnboardingStep } from "@/lib/schemas";
+import type { Agent, OnboardingStep } from "@/lib/schemas";
 
 /** Ключи запросов. Все данные приходят через интерфейс Api (localStorage сейчас, REST потом). */
 export const qk = {
@@ -12,7 +12,10 @@ export const qk = {
   onboarding: ["onboarding"] as const,
   agents: ["agents"] as const,
   notifications: ["notifications"] as const,
-  activity: ["activity"] as const
+  activity: ["activity"] as const,
+  funnels: ["funnels"] as const,
+  stages: ["stages"] as const,
+  channels: ["channels"] as const
 };
 
 export const useLeads = () => useQuery({ queryKey: qk.leads, queryFn: () => getApi().leads.list() });
@@ -22,6 +25,9 @@ export const useOnboarding = () => useQuery({ queryKey: qk.onboarding, queryFn: 
 export const useAgents = () => useQuery({ queryKey: qk.agents, queryFn: () => getApi().agents.list() });
 export const useNotifications = () => useQuery({ queryKey: qk.notifications, queryFn: () => getApi().notifications.list() });
 export const useActivity = () => useQuery({ queryKey: qk.activity, queryFn: () => getApi().reference.activity() });
+export const useFunnels = () => useQuery({ queryKey: qk.funnels, queryFn: () => getApi().reference.funnels() });
+export const useStages = () => useQuery({ queryKey: qk.stages, queryFn: () => getApi().reference.stages() });
+export const useChannels = () => useQuery({ queryKey: qk.channels, queryFn: () => getApi().reference.channels() });
 
 /** Отметка шага онбординга: оптимистичное обновление с откатом при ошибке. */
 export function useToggleOnboarding() {
@@ -38,6 +44,33 @@ export function useToggleOnboarding() {
       if (ctx?.prev) qc.setQueryData(qk.onboarding, ctx.prev);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: qk.onboarding })
+  });
+}
+
+/** Изменение сотрудника (инструкция, пауза): оптимистичное обновление с откатом при ошибке; id не меняется. */
+export function useUpdateAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<Agent> }) => getApi().agents.update(id, patch),
+    onMutate: async ({ id, patch }) => {
+      await qc.cancelQueries({ queryKey: qk.agents });
+      const prev = qc.getQueryData<Agent[]>(qk.agents);
+      qc.setQueryData<Agent[]>(qk.agents, (list) => list?.map((a) => (a.id === id ? { ...a, ...patch, id: a.id } : a)));
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(qk.agents, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.agents })
+  });
+}
+
+/** Создание сотрудника в мастере: запись появляется в списке после подтверждения адаптером. */
+export function useCreateAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (agent: Agent) => getApi().agents.create(agent),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.agents })
   });
 }
 
