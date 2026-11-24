@@ -1,4 +1,4 @@
-import type { ActivityPoint, Channel, CollectionName, Funnel, ItemOf, Lead, Stage } from "@/lib/schemas";
+import type { ActivityPoint, ChainTemplate, Channel, CollectionName, CompanyProfile, Funnel, ItemOf, KnowledgeSource, Lead, QuizQuestion, Stage, SupplyOffer, SupplyRequest } from "@/lib/schemas";
 
 export type ApiErrorCode = "validation" | "not_found" | "duplicate" | "unavailable" | "invalid_import";
 
@@ -12,8 +12,9 @@ export class ApiError extends Error {
   }
 }
 
-/** Репозиторий коллекции. Реализации: localStorage (сейчас), REST/MSW (этап 10) — интерфейс общий. */
-export interface Repository<K extends CollectionName> {
+/** Репозиторий коллекции. Реализации: localStorage (сейчас), REST/MSW (этап 10) — интерфейс общий.
+ *  COMPANY_PROFILE — одиночная запись (объект), доступна через `api.companyProfile`, а не репозиторий. */
+export interface Repository<K extends Exclude<CollectionName, "COMPANY_PROFILE">> {
   list(): Promise<ItemOf<K>[]>;
   get(id: string): Promise<ItemOf<K> | undefined>;
   create(item: ItemOf<K>): Promise<ItemOf<K>>;
@@ -32,6 +33,17 @@ export interface LeadRepository extends Repository<"LEADS"> {
   createMany(items: Lead[]): Promise<Lead[]>;
 }
 
+/** Репозиторий курсов: дополнительно завершение курса выдачей сертификата (db.js completeCourse). */
+export interface CourseRepository extends Repository<"COURSES"> {
+  complete(courseId: string, info: { name: string; score: number }): Promise<ItemOf<"CERTIFICATES">>;
+}
+
+/** Демо-тесты курсов: вопросы по курсам и проходной балл (data.js QUIZZES/QUIZ_PASS). */
+export interface QuizBundle {
+  pass: number;
+  quizzes: Record<string, QuizQuestion[]>;
+}
+
 export interface Api {
   leads: LeadRepository;
   conversations: Repository<"CONVERSATIONS">;
@@ -41,13 +53,22 @@ export interface Api {
   calendarEvents: Repository<"CALENDAR_EVENTS">;
   notifications: Repository<"NOTIFICATIONS">;
   agents: Repository<"AGENTS">;
-  courses: Repository<"COURSES">;
+  courses: CourseRepository;
   certificates: Repository<"CERTIFICATES">;
+  companyProfile: {
+    get(): Promise<CompanyProfile>;
+    update(patch: Partial<CompanyProfile>): Promise<CompanyProfile>;
+  };
   reference: {
     channels(): Promise<Channel[]>;
     stages(): Promise<Stage[]>;
     funnels(): Promise<Funnel[]>;
     activity(): Promise<ActivityPoint[]>;
+    quizzes(): Promise<QuizBundle>;
+    knowledgeSources(): Promise<KnowledgeSource[]>;
+    chainTemplates(): Promise<ChainTemplate[]>;
+    supplyRequests(): Promise<SupplyRequest[]>;
+    supplyOffers(): Promise<SupplyOffer[]>;
   };
   data: {
     /** Снимок в формате прототипа (`version: 1` + коллекции): файлы обмениваются между версиями. */

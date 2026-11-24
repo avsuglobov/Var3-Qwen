@@ -1,6 +1,6 @@
-import { ACTIVITY, CHANNELS, FUNNELS, STAGES } from "@/lib/mock-data/reference";
+import { ACTIVITY, CHAIN_TEMPLATES, CHANNELS, FUNNELS, KNOWLEDGE_SOURCES, QUIZZES, QUIZ_PASS, STAGES, SUPPLY_OFFERS, SUPPLY_REQUESTS } from "@/lib/mock-data/reference";
 import { SEED_DATA } from "@/lib/mock-data/seed";
-import { COLLECTION_NAMES, COLLECTION_SCHEMAS, parseCollection, type CollectionName, type DbSnapshot, type ItemOf } from "@/lib/schemas";
+import { certificateSchema, COLLECTION_NAMES, COLLECTION_SCHEMAS, companyProfileSchema, parseCollection, type Certificate, type CollectionName, type CompanyProfile, type DbSnapshot, type ItemOf } from "@/lib/schemas";
 import { ApiError, type Api, type ImportResult, type Repository, type StorageLike } from "@/lib/api/types";
 
 /** Ключ и формат совпадают с прототипом (`aiws-db-v2`, `version: 1`): данные переносятся экспортом/импортом JSON. */
@@ -53,6 +53,9 @@ export function createLocalApi(options: LocalApiOptions = {}): Api {
             const r = parseCollection(name, parsed[name]);
             if (r) (snapshot as unknown as Record<string, unknown>)[name] = r.items;
           }
+          // COMPANY_PROFILE — объект (не массив): та же валидация схемой, иначе остаётся демо-профиль
+          const p = companyProfileSchema.safeParse(parsed["COMPANY_PROFILE"]);
+          if (p.success) (snapshot as unknown as Record<string, unknown>)["COMPANY_PROFILE"] = p.data;
         }
       } catch { /* битый JSON → демо-данные */ }
     }
@@ -74,7 +77,7 @@ export function createLocalApi(options: LocalApiOptions = {}): Api {
     return load();
   }
 
-  function repo<K extends CollectionName>(name: K): Repository<K> {
+  function repo<K extends Exclude<CollectionName, "COMPANY_PROFILE">>(name: K): Repository<K> {
     const schema = COLLECTION_SCHEMAS[name];
     const items = (): ItemOf<K>[] => (load() as unknown as Record<K, ItemOf<K>[]>)[name];
     const set = (next: ItemOf<K>[]): void => { (load() as unknown as Record<K, ItemOf<K>[]>)[name] = next; persist(); };
@@ -134,13 +137,50 @@ export function createLocalApi(options: LocalApiOptions = {}): Api {
     calendarEvents: repo("CALENDAR_EVENTS"),
     notifications: repo("NOTIFICATIONS"),
     agents: repo("AGENTS"),
-    courses: repo("COURSES"),
+    courses: {
+      ...repo("COURSES"),
+      /** Завершение курса после успешного теста: сертификат с оценкой, курс → «Завершён» (db.js completeCourse). */
+      async complete(courseId, info) {
+        await guard();
+        const name = String(info?.name ?? "").trim().slice(0, 80);
+        if (!name) throw new ApiError("validation", "Введите имя для сертификата");
+        const db = load();
+        const course = db.COURSES.find((c) => c.id === courseId);
+        if (!course) throw new ApiError("not_found", `Курс ${courseId} не найден`);
+        let max = 0;
+        for (const c of db.CERTIFICATES) { const m = /^cert-(\d+)$/.exec(c.id); if (m) max = Math.max(max, Number(m[1])); }
+        const cert = { id: `cert-${max + 1}`, name, course: course.title, date: new Date().toISOString().slice(0, 10), score: Math.min(1, Math.max(0, info.score)) };
+        const r = certificateSchema.safeParse(cert);
+        if (!r.success) throw new ApiError("validation", "Некорректные данные сертификата");
+        db.COURSES = db.COURSES.map((c) => (c.id === courseId ? { ...c, progress: 1, status: "Завершён" } : c));
+        db.CERTIFICATES = [...db.CERTIFICATES, r.data as Certificate];
+        persist();
+        return clone(r.data as Certificate);
+      }
+    },
     certificates: repo("CERTIFICATES"),
+    companyProfile: {
+      async get() { await guard(); return clone((load() as unknown as Record<"COMPANY_PROFILE", CompanyProfile>).COMPANY_PROFILE); },
+      async update(patch) {
+        await guard();
+        const db = load() as unknown as Record<"COMPANY_PROFILE", CompanyProfile>;
+        const next = companyProfileSchema.safeParse({ ...db.COMPANY_PROFILE, ...patch });
+        if (!next.success) throw new ApiError("validation", "Некорректное описание компании");
+        db.COMPANY_PROFILE = next.data;
+        persist();
+        return clone(next.data);
+      }
+    },
     reference: {
       async channels() { await guard(); return clone(Object.values(CHANNELS)); },
       async stages() { await guard(); return clone(STAGES); },
       async funnels() { await guard(); return clone(FUNNELS); },
-      async activity() { await guard(); return clone(ACTIVITY); }
+      async activity() { await guard(); return clone(ACTIVITY); },
+      async quizzes() { await guard(); return { pass: QUIZ_PASS, quizzes: clone(QUIZZES) }; },
+      async knowledgeSources() { await guard(); return clone(KNOWLEDGE_SOURCES); },
+      async chainTemplates() { await guard(); return clone(CHAIN_TEMPLATES); },
+      async supplyRequests() { await guard(); return clone(SUPPLY_REQUESTS); },
+      async supplyOffers() { await guard(); return clone(SUPPLY_OFFERS); }
     },
     data: {
       async exportJSON() { await guard(); return JSON.stringify({ version: SNAPSHOT_VERSION, ...load() }, null, 2); },
@@ -159,6 +199,11 @@ export function createLocalApi(options: LocalApiOptions = {}): Api {
           (next as unknown as Record<string, unknown>)[name] = r.items;
           dropped += r.dropped;
           imported.push(name);
+        }
+        // COMPANY_PROFILE — объект (не массив): та же валидация схемой; в отчёте импорта не числится, но перезаписывается
+        if (parsed["COMPANY_PROFILE"] !== undefined) {
+          const p = companyProfileSchema.safeParse(parsed["COMPANY_PROFILE"]);
+          if (p.success) (next as unknown as Record<string, unknown>)["COMPANY_PROFILE"] = p.data; else dropped += 1;
         }
         if (imported.length === 0) throw new ApiError("invalid_import", "Файл не содержит допустимых данных");
         persist();

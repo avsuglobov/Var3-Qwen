@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { PagePlaceholder } from "@/components/layout/page-placeholder";
+import { AnalyticsView } from "@/components/analytics/analytics-view";
 
 export const metadata: Metadata = { title: "Аналитика" };
 
+/** Раздел «Аналитика»: разбор диалогов менеджеров и чат «Вопрос руководителю». */
 export default function Page() {
-  return <PagePlaceholder id="analytics" />;
+  return <AnalyticsView />;
 }

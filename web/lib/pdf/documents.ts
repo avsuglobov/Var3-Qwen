@@ -12,7 +12,7 @@ import type { Document } from "@/lib/schemas";
  */
 import type { jsPDF } from "jspdf";
 
-const PAL = {
+export const PAL = {
   accent: [184, 67, 26],
   ink: [20, 20, 20],
   ink2: [30, 30, 30],

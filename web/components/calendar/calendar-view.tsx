@@ -21,7 +21,6 @@ import {
   type EventType
 } from "@/lib/selectors/calendar";
 import { cn } from "@/lib/utils";
-import type { CalendarEvent } from "@/lib/schemas";
 
 const EV_ICON: Record<EventType, typeof Phone> = {
   call: Phone,
