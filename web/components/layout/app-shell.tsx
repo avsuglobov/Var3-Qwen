@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Brand } from "@/components/layout/brand";
 import { CommandPalette } from "@/components/layout/command-palette";
@@ -16,9 +16,23 @@ function Shell({ children }: { children: ReactNode }) {
   const collapsed = useUi((s) => s.sidebarCollapsed);
   const mobileOpen = useUi((s) => s.mobileNavOpen);
   const setMobileNav = useUi((s) => s.setMobileNav);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Этап 5 (a11y): Radix (Dialog, DropdownMenu) скрывает фон через aria-hidden (hideOthers),
+  // но не ставит inert — скрытые кнопки и ссылки остаются доступными клавиатуре и скринридерам
+  // (axe: aria-hidden-focus). Дублируем скрытие: aria-hidden на корне → корень же inert.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const apply = () => { root.inert = root.getAttribute("aria-hidden") === "true"; };
+    apply();
+    const obs = new MutationObserver(apply);
+    obs.observe(root, { attributes: true, attributeFilter: ["aria-hidden"] });
+    return () => { obs.disconnect(); root.inert = false; };
+  }, []);
 
   return (
-    <div className="flex min-h-dvh">
+    <div ref={rootRef} className="flex min-h-dvh">
       <a href="#main" className="skip-link">
         {ru.skipToContent}
       </a>

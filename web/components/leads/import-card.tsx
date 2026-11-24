@@ -71,18 +71,11 @@ export function ImportCard(props: ImportCardProps) {
       <h2 className="mb-4 text-[15px] font-medium leading-tight">Импорт из Excel и CSV</h2>
 
       {step === "drop" ? (
+        /* Зона — только drag-таргет: drag это мышиное взаимодействие, поэтому не делаем её фальшивой
+           role=button (axe: nested-interactive внутри настоящей кнопки, mismatch aria-label).
+           Доступный способ выбрать файл — кнопка «Выбрать файл» ниже (мышь и клавиатура). */
         <div
-          role="button"
-          tabIndex={0}
-          aria-label="Зона загрузки файла импорта"
           data-testid="leads-dropzone"
-          onClick={handlePick}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              handlePick();
-            }
-          }}
           onDragOver={(e) => {
             e.preventDefault();
             setDragOver(true);
@@ -90,14 +83,14 @@ export function ImportCard(props: ImportCardProps) {
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
           className={cn(
-            "flex min-w-0 cursor-pointer flex-col items-center gap-2 rounded-card border border-dashed border-border p-8 text-center transition-colors",
+            "flex min-w-0 flex-col items-center gap-2 rounded-card border border-dashed border-border p-8 text-center transition-colors",
             dragOver ? "bg-muted border-primary" : "hover:bg-muted"
           )}
         >
           <Upload className="size-7 text-muted-foreground" aria-hidden />
           <div className="text-sm font-medium">Перетащите файл .xlsx или .csv сюда</div>
           <div className="text-[13px] text-muted-foreground">{DROP_HINT}</div>
-          <Button type="button" variant="secondary" size="sm" className="mt-2" onClick={(e) => { e.stopPropagation(); handlePick(); }} data-testid="leads-pick-file">
+          <Button type="button" variant="secondary" size="sm" className="mt-2" onClick={handlePick} data-testid="leads-pick-file">
             <Download className="size-3.5" aria-hidden />
             Выбрать файл
           </Button>
