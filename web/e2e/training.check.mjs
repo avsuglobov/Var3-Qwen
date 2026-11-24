@@ -12,7 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { BASE, launch, reporter, startServer, waitReady } from "./lib/harness.mjs";
+import { apiItems, apiReset, BASE, launch, reporter, startServer, waitReady } from "./lib/harness.mjs";
 
 const { check, done } = reporter();
 
@@ -30,9 +30,9 @@ async function main() {
     page.on("request", (r) => { try { hosts.add(new URL(r.url()).host); } catch { /* data: */ } });
 
     const origin = async () => { if (!page.url().startsWith("http")) await page.goto(BASE + "/training", { waitUntil: "networkidle" }); };
-    const reset = () => origin().then(() => page.evaluate(() => localStorage.clear()));
+    const reset = async () => { await apiReset(); await origin(); await page.evaluate(() => localStorage.clear()); };
     const open = async (url = "/training") => { await page.goto(BASE + url, { waitUntil: "networkidle" }); await page.waitForSelector("[data-testid=training-courses], main [role=alert]"); };
-    const db = () => page.evaluate(() => JSON.parse(localStorage.getItem("aiws-db-v2") || "{}"));
+    const db = async () => ({ COURSES: await apiItems("courses"), CERTIFICATES: await apiItems("certificates") });
     const saveFile = async (dl) => { const tmp = path.join(os.tmpdir(), "aiws-" + Date.now() + "-" + Math.random().toString(36).slice(2)); await dl.saveAs(tmp); const buf = fs.readFileSync(tmp); fs.unlinkSync(tmp); return buf; };
     const quizBtn = (id) => page.locator(`[data-testid=training-quiz-btn][data-course=${id}]`);
     const answerAll = async (picks) => {
@@ -101,7 +101,7 @@ async function main() {
     await page.waitForSelector("[data-testid=training-cert-btn][data-course=crs-1]", { timeout: 5000 });
     check("фон обновился: у crs-1 «Сертификат», в списке два сертификата", (await page.locator("[data-testid=training-cert-btn][data-course=crs-1]").count()) === 1 && (await quizBtn("crs-1").count()) === 0 && (await page.locator("[data-testid=training-cert]").count()) === 2);
     const d1 = await db();
-    check("localStorage: crs-1 progress=1 «Завершён», cert-2 «Тестов Тест»", d1.COURSES.find((c) => c.id === "crs-1").progress === 1 && d1.CERTIFICATES.some((c) => c.name === "Тестов Тест" && c.id === "cert-2"));
+    check("сервер: crs-1 progress=1 «Завершён», cert-2 «Тестов Тест»", d1.COURSES.find((c) => c.id === "crs-1").progress === 1 && d1.CERTIFICATES.some((c) => c.name === "Тестов Тест" && c.id === "cert-2"));
     await open();
     check("перезагрузка: итоги сохраняются (курс + сертификат)", (await db()).COURSES.find((c) => c.id === "crs-1").progress === 1 && (await page.locator("[data-testid=training-cert]").count()) === 2);
 

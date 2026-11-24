@@ -5,7 +5,7 @@
    состояния loading/empty/error/success, overflow, контраст, консоль.
    Запуск: npm run build && node e2e/dialogs.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { BASE, launch, reporter, startServer, waitReady } from "./lib/harness.mjs";
+import { apiItems, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
 
 const { check, done } = reporter();
 
@@ -24,8 +24,9 @@ async function main() {
 
     const origin = async () => { if (!page.url().startsWith("http")) await page.goto(BASE + "/dialogs", { waitUntil: "networkidle" }); };
     const prepare = async (fn, arg) => { await origin(); await page.evaluate(fn, arg); };
-    const reset = () => prepare(() => localStorage.clear());
+    const reset = async () => { await apiReset(); await prepare(() => localStorage.clear()); };
     const open = async (url = "/dialogs") => { await page.goto(BASE + url, { waitUntil: "networkidle" }); await page.waitForSelector("[data-testid=chat-item], main [role=alert], [data-testid=dialogs-empty]"); };
+    const storageConvos = () => apiItems("conversations");
     const items = page.locator("[data-testid=chat-item]");
     const msgs = page.locator("[data-testid=chat-msg]");
     const chip = page.locator("[data-testid=chat-mode]");
@@ -33,12 +34,14 @@ async function main() {
     const chipText = async () => (await chip.innerText()).trim();
 
     // ---------- loading: скелетоны, затем данные
-    await reset(); await prepare(() => localStorage.setItem("aiws-mock-latency", "1500"));
+    await reset(); await setFaults({ latencyMs: 1500 });
     await page.goto(BASE + "/dialogs", { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[aria-busy=true]");
     check("loading: показаны скелетоны, переписки ещё нет", (await page.locator("[aria-busy=true]").count()) >= 1 && (await items.count()) === 0);
     await page.waitForSelector("[data-testid=chat-item]", { timeout: 8000 });
+    await waitFor(async () => (await page.locator("[aria-busy=true]").count()) === 0, { timeout: 10000 });
     check("loading → success: скелетоны исчезли, 3 диалога", (await page.locator("[aria-busy=true]").count()) === 0 && (await items.count()) === 3);
+    await setFaults({ latencyMs: 0 });
 
     // ---------- success: список и выбор по умолчанию
     await reset(); await open();
@@ -53,14 +56,14 @@ async function main() {
     // ---------- передача менеджеру и отправка сообщения
     await page.locator("[data-testid=chat-takeover]").click();
     await page.waitForFunction(() => document.querySelector("[data-testid=chat-mode]")?.textContent?.trim() === "Менеджер отвечает");
-    // адаптер имитирует задержку сети: ждём факта записи в localStorage, а не только оптимистичный UI
-    await page.waitForFunction(() => { try { return (JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").CONVERSATIONS || []).find((c) => c.id === "cv-1")?.mode === "human"; } catch { return false; } }, undefined, { timeout: 8000 });
+    // запись идёт на сервер через REST: ждём факта записи, а не только оптимистичный UI
+    await waitFor(async () => (await storageConvos()).find((c) => c.id === "cv-1")?.mode === "human");
     check("передача: чип «Менеджер отвечает», поле активно с плейсхолдером «Ответ менеджера…»", (await chipText()) === "Менеджер отвечает" && !(await input.isDisabled()) && (await input.getAttribute("placeholder")) === "Ответ менеджера…");
     const before = await msgs.count();
     await input.fill("Проверка отправки сообщения");
     await page.locator("[data-testid=chat-send]").click();
     await page.waitForFunction((n) => document.querySelectorAll("[data-testid=chat-msg]").length === n + 1, before);
-    await page.waitForFunction((n) => { try { const cv = (JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").CONVERSATIONS || []).find((c) => c.id === "cv-1"); return cv?.mode === "reading" && (cv?.messages?.length ?? 0) === n + 1; } catch { return false; } }, before, { timeout: 8000 });
+    await waitFor(async () => { const cv = (await storageConvos()).find((c) => c.id === "cv-1"); return cv?.mode === "reading" && (cv?.messages?.length ?? 0) === before + 1; });
     const last = msgs.last();
     check("сообщение отправлено: автор «Менеджер», время ЧЧ:ММ", (await last.getAttribute("data-from")) === "human" && /Менеджер · \d{2}:\d{2}/.test(await last.innerText()));
     check("после ответа менеджера диалог в «ИИ в режиме чтения»", (await chipText()) === "ИИ в режиме чтения");
@@ -68,7 +71,7 @@ async function main() {
     check("превью в списке обновилось текстом сообщения", (await items.first().innerText()).includes("Проверка отправки сообщения"));
     await page.reload({ waitUntil: "networkidle" });
     await page.waitForSelector("[data-testid=chat-msg]");
-    check("перезагрузка: сообщение и режим сохранены (localStorage)", (await msgs.count()) === before + 1 && (await chipText()) === "ИИ в режиме чтения");
+    check("перезагрузка: сообщение и режим сохранены (на сервере)", (await msgs.count()) === before + 1 && (await chipText()) === "ИИ в режиме чтения");
 
     // ---------- пустая отправка и возврат ИИ
     const saved = await msgs.count();
@@ -76,7 +79,7 @@ async function main() {
     check("пустое поле: сообщение не отправляется", (await msgs.count()) === saved);
     await page.locator("[data-testid=chat-giveback]").click();
     await page.waitForFunction(() => document.querySelector("[data-testid=chat-mode]")?.textContent?.trim() === "ИИ отвечает");
-    await page.waitForFunction(() => { try { return (JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").CONVERSATIONS || []).find((c) => c.id === "cv-1")?.mode === "ai"; } catch { return false; } }, undefined, { timeout: 8000 });
+    await waitFor(async () => (await storageConvos()).find((c) => c.id === "cv-1")?.mode === "ai");
     check("возврат ИИ: чип «ИИ отвечает», поле снова отключено", (await chipText()) === "ИИ отвечает" && (await input.isDisabled()));
 
     // ---------- отправка по Enter и второй диалог
@@ -84,7 +87,7 @@ async function main() {
     await input.fill("Сообщение через Enter");
     await input.press("Enter");
     await page.waitForFunction((n) => document.querySelectorAll("[data-testid=chat-msg]").length === n + 1, saved);
-    await page.waitForFunction((n) => { try { return (JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").CONVERSATIONS || []).find((c) => c.id === "cv-1")?.messages?.length === n + 1; } catch { return false; } }, saved, { timeout: 8000 });
+    await waitFor(async () => (await storageConvos()).find((c) => c.id === "cv-1")?.messages?.length === saved + 1);
     check("Enter отправляет сообщение", (await msgs.last().innerText()).includes("Сообщение через Enter"));
     await items.nth(1).click();
     await page.waitForFunction(() => document.querySelector("[data-testid=chat-thread]")?.getAttribute("data-conv-id") === "cv-2");

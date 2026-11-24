@@ -290,7 +290,7 @@ function DataTab() {
         </div>
         <p className="inline-flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
           <AlertTriangle className="size-3.5" aria-hidden />
-          Данные хранятся локально в браузере (localStorage) и никуда не отправляются.
+          Данные хранятся на сервере приложения (.data/db.json), формат файла совместим с прототипом.
         </p>
       </div>
     </div>

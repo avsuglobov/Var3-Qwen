@@ -31,3 +31,47 @@ export function reporter() {
   const done = (label) => { const ok = results.every((r) => r.ok); console.log(ok ? `\n${label}: все проверки пройдены (${results.length})` : `\n${label}: есть провалы`); return ok ? 0 : 1; };
   return { check, done };
 }
+
+/* REST-хелперы (этап 4): данные теперь на сервере, поэтому сброс, сбои и «что записалось»
+   проверяются напрямую через API, а не через localStorage. */
+
+export async function apiReset(base = BASE) {
+  const res = await fetch(base + "/api/data/reset", { method: "POST" });
+  if (!res.ok) throw new Error("api/data/reset → " + res.status);
+}
+
+/** Панель сбоев сервера: fail (503), latencyMs (задержка ответов), corrupt (битый снимок хранилища). */
+export async function setFaults(patch, base = BASE) {
+  const res = await fetch(base + "/api/debug", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) });
+  if (!res.ok) throw new Error("api/debug → " + res.status);
+  return res.json();
+}
+
+export async function apiItems(slug, base = BASE) {
+  const res = await fetch(`${base}/api/collections/${slug}`);
+  if (!res.ok) throw new Error(`api/collections/${slug} → ${res.status}`);
+  return res.json();
+}
+
+export async function apiProfile(base = BASE) {
+  const res = await fetch(base + "/api/company-profile");
+  if (!res.ok) throw new Error("api/company-profile → " + res.status);
+  return res.json();
+}
+
+/** Частичный снимок (формат прототипа): перечисленные коллекции заменяются целиком. */
+export async function importSnapshot(snapshot, base = BASE) {
+  const res = await fetch(base + "/api/data/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(snapshot) });
+  if (!res.ok) throw new Error("api/data/import → " + res.status);
+  return res.json();
+}
+
+/** Опрос условия до истинности: серверное состояние проверяется из Node, page.waitForFunction его не видит. */
+export async function waitFor(fn, { timeout = 10000, interval = 200 } = {}) {
+  const started = Date.now();
+  for (;;) {
+    if (await fn()) return true;
+    if (Date.now() - started > timeout) return false;
+    await new Promise((r) => setTimeout(r, interval));
+  }
+}

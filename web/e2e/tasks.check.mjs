@@ -3,11 +3,11 @@
    выполнена»/«вернуть в работу»), удаление без подтверждения с ролью=status «Задача удалена»
    (как в прототипе), фильтры Все/Активные/Выполненные и пустое состояние, создание задачи
    (пустое название → «Введите название задачи», TK-7), доска приоритетов на dnd-kit (3 колонки,
-   счётчики, перетаскивание карточки мышью с записью в localStorage), overflow 375…1920 × 2 темы
+   счётчики, перетаскивание карточки мышью с записью на сервере), overflow 375…1920 × 2 темы
    (список и доска), контраст AA, внешние запросы, консоль.
    Запуск: npm run build && node e2e/tasks.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { BASE, launch, reporter, startServer, waitReady } from "./lib/harness.mjs";
+import { apiItems, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
 
 const { check, done } = reporter();
 
@@ -26,9 +26,9 @@ async function main() {
 
     const origin = async () => { if (!page.url().startsWith("http")) await page.goto(BASE + "/tasks", { waitUntil: "networkidle" }); };
     const prepare = async (fn, arg) => { await origin(); await page.evaluate(fn, arg); };
-    const reset = () => prepare(() => localStorage.clear());
+    const reset = async () => { await apiReset(); await prepare(() => localStorage.clear()); };
     const open = async (url = "/tasks") => { await page.goto(BASE + url, { waitUntil: "networkidle" }); await page.waitForSelector("[data-testid=tasks-list], [data-testid=tasks-board], main [role=alert]"); };
-    const storageTasks = () => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").TASKS || []; } catch { return []; } });
+    const storageTasks = () => apiItems("tasks");
     const todayISO = () => { const t = new Date(); const p = (n) => (n < 10 ? "0" + n : "" + n); return t.getFullYear() + "-" + p(t.getMonth() + 1) + "-" + p(t.getDate()); };
     const feedback = () => page.locator("[data-testid=tasks-feedback]").innerText().catch(() => "");
     const switchView = async (v) => { await page.locator(`[data-testid=tasks-view][data-value=${v}]`).click(); await page.waitForSelector(v === "list" ? "[data-testid=tasks-list]" : "[data-testid=tasks-board]"); };
@@ -37,6 +37,8 @@ async function main() {
     const dragCard = async (taskId, toPriority) => {
       const card = page.locator(`[data-testid=tasks-card][data-task=${taskId}]`);
       const col = page.locator(`[data-testid=tasks-col][data-priority=${toPriority}]`);
+      // после refetch доска перерисовывается — карточка на миг отвязана, ждём её возврата
+      await card.waitFor({ state: "visible", timeout: 8000 });
       const box = await card.boundingBox(), tbox = await col.boundingBox();
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       await page.mouse.down();
@@ -51,12 +53,14 @@ async function main() {
     };
 
     // ---------- loading: скелетоны, затем данные
-    await reset(); await prepare(() => localStorage.setItem("aiws-mock-latency", "1500"));
+    await reset(); await setFaults({ latencyMs: 1500 });
     await page.goto(BASE + "/tasks", { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[aria-busy=true]");
     check("loading: показаны скелетоны KPI, списка ещё нет", (await page.locator("[aria-busy=true]").count()) >= 1 && (await page.locator("[data-testid=tasks-list]").count()) === 0);
     await page.waitForSelector("[data-testid=tasks-list]", { timeout: 8000 });
+    await waitFor(async () => (await page.locator("[aria-busy=true]").count()) === 0, { timeout: 10000 });
     check("loading → success: скелетоны исчезли, список задач заполнен", (await page.locator("[aria-busy=true]").count()) === 0 && (await page.locator("[data-testid=tasks-row]").count()) === 6);
+    await setFaults({ latencyMs: 0 });
 
     // ---------- KPI: просрочка считается от текущей даты
     await reset(); await open();
@@ -74,7 +78,7 @@ async function main() {
     await page.locator("[data-testid=tasks-toggle][data-task=TK-3]").click();
     await page.waitForTimeout(400);
     check("toggle TK-3: «Задача выполнена», KPI Активные 4 / Выполнено 2", (await feedback()).includes("Задача выполнена") && (await page.locator("[data-testid=tasks-kpi-active]").innerText()) === "4" && (await page.locator("[data-testid=tasks-kpi-done]").innerText()) === "2");
-    check("toggle записан в localStorage (TK-3 done)", (await storageTasks()).find((t) => t.id === "TK-3")?.done === true);
+    check("toggle записан на сервере (TK-3 done)", (await storageTasks()).find((t) => t.id === "TK-3")?.done === true);
     await page.locator("[data-testid=tasks-toggle][data-task=TK-3]").click();
     await page.waitForTimeout(400);
     check("возврат TK-3: «Задача возвращена в работу»", (await feedback()).includes("Задача возвращена в работу") && (await storageTasks()).find((t) => t.id === "TK-3")?.done === false);
@@ -90,7 +94,7 @@ async function main() {
     await page.locator("[data-testid=tasks-new-save]").click();
     await page.waitForSelector("[data-testid=tasks-row][data-task=TK-7]", { timeout: 5000 });
     check("создание TK-7: «Задача создана», в списке с исполнителем Бухгалтерия, Всего 7", (await feedback()).includes("Задача создана") && (await page.locator("[data-testid=tasks-row][data-task=TK-7]").innerText()).includes("Бухгалтерия") && (await page.locator("[data-testid=tasks-kpi-total]").innerText()) === "7");
-    check("TK-7 записан в localStorage (TK-7, не выполнена)", (await storageTasks()).find((t) => t.id === "TK-7")?.done === false);
+    check("TK-7 записан на сервере (TK-7, не выполнена)", (await storageTasks()).find((t) => t.id === "TK-7")?.done === false);
 
     // ---------- удаление без подтверждения (как в прототипе)
     await page.locator("[data-testid=tasks-delete][data-task=TK-6]").click();
@@ -107,7 +111,7 @@ async function main() {
     check("фильтр «Активные» не пуст", (await page.locator("[data-testid=tasks-row]").count()) >= 3);
     await setFilter("all");
 
-    // ---------- доска: колонки, счётчики, перетаскивание, запись в localStorage
+    // ---------- доска: колонки, счётчики, перетаскивание, запись на сервере
     await switchView("board");
     check("доска: 3 колонки приоритетов (Высокий/Средний/Низкий) со счётчиками", (await page.locator("[data-testid=tasks-col]").count()) === 3 && (await page.locator("[data-testid=tasks-col-count]").count()) === 3);
     const countHighBefore = await page.locator("[data-testid=tasks-col][data-priority=high] [data-testid=tasks-col-count]").innerText();
@@ -115,7 +119,7 @@ async function main() {
     await dragCard("TK-2", "med");
     await page.waitForTimeout(500);
     check("перетаскивание TK-2 из «Высокого» в «Средний»: счётчики обновились", (await page.locator("[data-testid=tasks-col][data-priority=high] [data-testid=tasks-col-count]").innerText()) === String(Number(countHighBefore) - 1) && (await page.locator("[data-testid=tasks-col][data-priority=med] [data-testid=tasks-col-count]").innerText()) === String(Number(countMedBefore) + 1));
-    check("приоритет записан в localStorage (TK-2 med), «Приоритет изменён»", (await storageTasks()).find((t) => t.id === "TK-2")?.priority === "med" && (await feedback()).includes("Приоритет изменён"));
+    check("приоритет записан на сервере (TK-2 med), «Приоритет изменён»", (await storageTasks()).find((t) => t.id === "TK-2")?.priority === "med" && (await feedback()).includes("Приоритет изменён"));
     await dragCard("TK-1", "med");
     await page.waitForTimeout(500);
     check("пустая колонка «Высокий» показывает «Перетащите карточку сюда»", (await page.locator("[data-testid=tasks-col][data-priority=high]").innerText()).includes("Перетащите карточку сюда"));

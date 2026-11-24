@@ -11,7 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { BASE, launch, reporter, startServer, waitReady } from "./lib/harness.mjs";
+import { apiProfile, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady } from "./lib/harness.mjs";
 
 const { check, done } = reporter();
 
@@ -24,13 +24,14 @@ async function main() {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await ctx.newPage();
     const problems = [], hosts = new Set();
-    page.on("console", (m) => { if (["error", "warning"].includes(m.type())) problems.push(m.type() + ": " + m.text().slice(0, 200)); });
+    // намеренные ошибки сети из сценариев (сбой 503, битый импорт 422) браузер пишет в консоль как «Failed to load resource»; это не ошибки приложения
+    page.on("console", (m) => { if (["error", "warning"].includes(m.type()) && !/Failed to load resource.*status of (503|422)/.test(m.text())) problems.push(m.type() + ": " + m.text().slice(0, 200)); });
     page.on("pageerror", (e) => problems.push("pageerror: " + String(e).slice(0, 200)));
     page.on("request", (r) => { try { hosts.add(new URL(r.url()).host); } catch { /* data: */ } });
 
     const origin = async () => { if (!page.url().startsWith("http")) await page.goto(BASE + "/integrations", { waitUntil: "networkidle" }); };
     const prepare = async (fn, arg) => { await origin(); await page.evaluate(fn, arg); };
-    const reset = () => prepare(() => localStorage.clear());
+    const reset = async () => { await apiReset(); await prepare(() => localStorage.clear()); };
     const open = async (url = "/integrations") => {
       const waitSel = { "/integrations": "[data-testid=integrations-card]", "/settings": "[data-testid=settings-tab-profile]", "/help": "[data-testid=help-chat]" }[url];
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -43,15 +44,15 @@ async function main() {
         }
       }
     };
-    const profileOf = () => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").COMPANY_PROFILE || null; } catch { return null; } });
+    const profileOf = () => apiProfile();
 
     // ================= Интеграции
-    await reset(); await prepare(() => localStorage.setItem("aiws-mock-latency", "1500"));
+    await reset(); await setFaults({ latencyMs: 1500 });
     await page.goto(BASE + "/integrations", { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[aria-busy=true]");
     check("loading: скелетоны показаны, карточек ещё нет", (await page.locator("[aria-busy=true]").count()) >= 1 && (await page.locator("[data-testid=integrations-card]").count()) === 0);
     await page.waitForSelector("[data-testid=integrations-card]", { timeout: 8000 });
-    await prepare(() => localStorage.removeItem("aiws-mock-latency"));
+    await setFaults({ latencyMs: 0 });
     check("success: 8 карточек, бейдж «Демо» у каждой", (await page.locator("[data-testid=integrations-card]").count()) === 8 && (await page.locator("[data-testid=integrations-card]:has-text('Демо')").count()) === 8);
     check("шапка: «Интеграции», «Подключение внешних сервисов и каналов»", (await page.locator("h1").innerText()) === "Интеграции" && /Подключение внешних сервисов и каналов/.test(await page.locator("main").innerText()));
     const amocrm = await page.locator("[data-testid=integrations-card][data-int=int-amocrm]").innerText();
@@ -89,7 +90,7 @@ async function main() {
     // вкладка «Данные»: экспорт → импорт → битый файл → сброс
     await page.locator("[data-testid=settings-tab-data]").click();
     const dataText = await page.locator("main").innerText();
-    check("данные: «Экспорт в JSON», «Импорт из JSON», «Сбросить к демо», подсказка про localStorage", dataText.includes("Экспорт в JSON") && dataText.includes("Импорт из JSON") && dataText.includes("Сбросить к демо") && /Данные хранятся локально в браузере \(localStorage\)/.test(dataText));
+    check("данные: «Экспорт в JSON», «Импорт из JSON», «Сбросить к демо», подсказка про хранилище", dataText.includes("Экспорт в JSON") && dataText.includes("Импорт из JSON") && dataText.includes("Сбросить к демо") && /Данные хранятся на сервере приложения \(\.data\/db\.json\)/.test(dataText));
     const downloadPromise = page.waitForEvent("download", { timeout: 8000 });
     await page.locator("[data-testid=settings-export]").click();
     const download = await downloadPromise;
@@ -104,7 +105,7 @@ async function main() {
     fs.writeFileSync(modified, JSON.stringify(saved));
     await page.locator("[data-testid=settings-import-input]").setInputFiles(modified);
     await page.waitForFunction(() => document.querySelector("[data-testid=settings-data-feedback]")?.textContent?.includes("Данные импортированы"), { timeout: 8000 });
-    check("импорт: «Данные импортированы», профиль записан в localStorage", !(await page.locator("[data-testid=settings-data-feedback]").innerText()).includes("пропущено") && (await profileOf())?.name === "ООО «Импорт»");
+    check("импорт: «Данные импортированы», профиль записан на сервере", !(await page.locator("[data-testid=settings-data-feedback]").innerText()).includes("пропущено") && (await profileOf())?.name === "ООО «Импорт»");
     const bad = path.join(path.dirname(modified), "bad.json");
     fs.writeFileSync(bad, "{ не json");
     await page.locator("[data-testid=settings-import-input]").setInputFiles(bad);
