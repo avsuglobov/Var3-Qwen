@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getApi } from "@/lib/api";
-import type { Agent, Conversation, Document, Lead, OnboardingStep } from "@/lib/schemas";
+import type { Agent, Conversation, Document, Lead, OnboardingStep, Task } from "@/lib/schemas";
 
 /** Ключи запросов. Все данные приходят через интерфейс Api (localStorage сейчас, REST потом). */
 export const qk = {
@@ -15,7 +15,9 @@ export const qk = {
   activity: ["activity"] as const,
   funnels: ["funnels"] as const,
   stages: ["stages"] as const,
-  channels: ["channels"] as const
+  channels: ["channels"] as const,
+  tasks: ["tasks"] as const,
+  calendarEvents: ["calendarEvents"] as const
 };
 
 export const useLeads = () => useQuery({ queryKey: qk.leads, queryFn: () => getApi().leads.list() });
@@ -28,6 +30,8 @@ export const useActivity = () => useQuery({ queryKey: qk.activity, queryFn: () =
 export const useFunnels = () => useQuery({ queryKey: qk.funnels, queryFn: () => getApi().reference.funnels() });
 export const useStages = () => useQuery({ queryKey: qk.stages, queryFn: () => getApi().reference.stages() });
 export const useChannels = () => useQuery({ queryKey: qk.channels, queryFn: () => getApi().reference.channels() });
+export const useTasks = () => useQuery({ queryKey: qk.tasks, queryFn: () => getApi().tasks.list() });
+export const useCalendarEvents = () => useQuery({ queryKey: qk.calendarEvents, queryFn: () => getApi().calendarEvents.list() });
 
 /** Отметка шага онбординга: оптимистичное обновление с откатом при ошибке. */
 export function useToggleOnboarding() {
@@ -170,6 +174,60 @@ export function useDeleteDocument() {
   return useMutation({
     mutationFn: (id: string) => getApi().documents.remove(id),
     onSettled: () => qc.invalidateQueries({ queryKey: qk.documents })
+  });
+}
+
+/** Создание задачи: запись появляется в списке после подтверждения адаптером. */
+export function useCreateTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (task: Task) => getApi().tasks.create(task),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.tasks })
+  });
+}
+
+/** Готово/вернуть в работу: оптимистичное обновление с откатом при ошибке. */
+export function useToggleTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, done }: { id: string; done: boolean }) => getApi().tasks.update(id, { done }),
+    onMutate: async ({ id, done }) => {
+      await qc.cancelQueries({ queryKey: qk.tasks });
+      const prev = qc.getQueryData<Task[]>(qk.tasks);
+      qc.setQueryData<Task[]>(qk.tasks, (list) => list?.map((t) => (t.id === id ? { ...t, done } : t)));
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(qk.tasks, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.tasks })
+  });
+}
+
+/** Правка задачи (приоритет перетаскиванием на доске): оптимистичное обновление с откатом. */
+export function useUpdateTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<Task> }) => getApi().tasks.update(id, patch),
+    onMutate: async ({ id, patch }) => {
+      await qc.cancelQueries({ queryKey: qk.tasks });
+      const prev = qc.getQueryData<Task[]>(qk.tasks);
+      qc.setQueryData<Task[]>(qk.tasks, (list) => list?.map((t) => (t.id === id ? { ...t, ...patch, id: t.id } : t)));
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(qk.tasks, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.tasks })
+  });
+}
+
+/** Удаление задачи: список обновляется после подтверждения адаптером. */
+export function useDeleteTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => getApi().tasks.remove(id),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.tasks })
   });
 }
 
