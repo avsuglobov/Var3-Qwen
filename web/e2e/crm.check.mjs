@@ -1,7 +1,7 @@
 /* crm.check.mjs — браузерные проверки раздела «CRM» (этап 3, группа 3): журнал смены с инспектором
    лида, смена стадии списком, канбан (колонки, счётчики, КРИТИЧНО, dnd-kit перетаскивание мышью,
    клик по карточке), таблица (фильтр по стадиям, сортировка ID → Имя → Активность, клик по строке),
-   создание и удаление лида с подтверждением, deep-link ?lead=, «Открыть диалог», «Документ» — «Скоро»,
+   создание и удаление лида с подтверждением, deep-link ?lead=, «Открыть диалог», «Документ» открывает модалку с клиентом из лида,
    переименование «ИИ-» → «AI-», overflow 375…1920 × 2 темы, контраст, консоль.
    Запуск: npm run build && node e2e/crm.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
@@ -79,7 +79,10 @@ async function main() {
     await page.waitForURL("**/dialogs");
     check("«Открыть диалог» у лида с диалогом ведёт на /dialogs", page.url().endsWith("/dialogs"));
     await open();
-    check("«Документ» отключён с пометкой «Скоро»", (await page.locator("[data-testid=crm-make-doc]").isDisabled()) && /Скоро|этап/.test(await page.locator("[data-testid=crm-make-doc]").getAttribute("title") || ""));
+    await page.locator("[data-testid=crm-make-doc]").click();
+    await page.waitForSelector("[data-testid=docs-new-type]");
+    check("«Документ» активен и открывает модалку с клиентом из лида", (await page.locator("[data-testid=docs-new-client]").inputValue()).trim() === (await page.locator("[data-testid=crm-inspector]").innerText()).split("\n")[0].trim());
+    await page.locator("[data-testid=docs-new-cancel]").click();
 
     // ---------- канбан: колонки, счётчики, перетаскивание, клик
     await switchView("kanban");

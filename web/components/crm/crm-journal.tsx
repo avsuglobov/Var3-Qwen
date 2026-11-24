@@ -26,6 +26,7 @@ export function CrmJournal({
   onSelect,
   onMoveStage,
   onDelete,
+  onMakeDoc,
   onFeedback
 }: {
   rows: readonly JournalRow[];
@@ -38,6 +39,7 @@ export function CrmJournal({
   onSelect: (leadId: string) => void;
   onMoveStage: (leadId: string, stageId: string) => void;
   onDelete: (lead: Lead) => void;
+  onMakeDoc: (lead: Lead) => void;
   onFeedback: (text: string, kind?: "status" | "alert") => void;
 }) {
   return (
@@ -86,6 +88,7 @@ export function CrmJournal({
               conversation={conversations.find((c) => c.contactName === selected.name)}
               onMoveStage={onMoveStage}
               onDelete={onDelete}
+              onMakeDoc={onMakeDoc}
               onFeedback={onFeedback}
             />
           ) : (
@@ -111,6 +114,7 @@ function LeadInspector({
   conversation,
   onMoveStage,
   onDelete,
+  onMakeDoc,
   onFeedback
 }: {
   lead: Lead;
@@ -120,6 +124,7 @@ function LeadInspector({
   conversation: Conversation | undefined;
   onMoveStage: (leadId: string, stageId: string) => void;
   onDelete: (lead: Lead) => void;
+  onMakeDoc: (lead: Lead) => void;
   onFeedback: (text: string, kind?: "status" | "alert") => void;
 }) {
   const router = useRouter();
@@ -198,9 +203,9 @@ function LeadInspector({
           </Button>
           <Button
             size="sm"
-            disabled
-            title="Документы появятся на своём этапе — «Документы и PDF»"
-            className="disabled:opacity-100 text-muted-foreground-strong"
+            variant="secondary"
+            title={"Создать документ по клиенту «" + lead.name + "»"}
+            onClick={() => onMakeDoc(lead)}
             data-testid="crm-make-doc"
           >
             <FileText aria-hidden />

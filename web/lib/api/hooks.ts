@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getApi } from "@/lib/api";
-import type { Agent, Conversation, Lead, OnboardingStep } from "@/lib/schemas";
+import type { Agent, Conversation, Document, Lead, OnboardingStep } from "@/lib/schemas";
 
 /** Ключи запросов. Все данные приходят через интерфейс Api (localStorage сейчас, REST потом). */
 export const qk = {
@@ -134,6 +134,42 @@ export function useDeleteLead() {
   return useMutation({
     mutationFn: (id: string) => getApi().leads.remove(id),
     onSettled: () => qc.invalidateQueries({ queryKey: qk.leads })
+  });
+}
+
+/** Создание документа: запись появляется в очереди после подтверждения адаптером. */
+export function useCreateDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (doc: Document) => getApi().documents.create(doc),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.documents })
+  });
+}
+
+/** Согласование документа (одобрить/отклонить): оптимистичное обновление с откатом при ошибке. */
+export function useUpdateDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<Document> }) => getApi().documents.update(id, patch),
+    onMutate: async ({ id, patch }) => {
+      await qc.cancelQueries({ queryKey: qk.documents });
+      const prev = qc.getQueryData<Document[]>(qk.documents);
+      qc.setQueryData<Document[]>(qk.documents, (list) => list?.map((d) => (d.id === id ? { ...d, ...patch, id: d.id } : d)));
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(qk.documents, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.documents })
+  });
+}
+
+/** Удаление документа: список обновляется после подтверждения адаптером. */
+export function useDeleteDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => getApi().documents.remove(id),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.documents })
   });
 }
 

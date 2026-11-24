@@ -62,6 +62,13 @@ export const conversationSchema = z.object({
   context: z.object({ who: text(), channel: text(), history: text(), nextStep: text(), files: z.number().finite() })
 });
 
+/** Позиция печатной формы (pdf.js itemsFor); цены не выдумываются — null допустим. */
+export const documentItemSchema = z.object({
+  name: text(300),
+  qty: z.number().finite(),
+  price: z.number().nullish()
+});
+
 export const documentSchema = z.object({
   id,
   type: z.enum(["invoice", "offer", "act"]),
@@ -71,7 +78,9 @@ export const documentSchema = z.object({
   approver: text(300),
   created: optText,
   /** Сумма в рублях; null — не задана (цены не выдумываем). */
-  amount: z.number().nullish()
+  amount: z.number().nullish(),
+  /** Позиции печатной формы; придут с бэкенда — в демо сиде их нет. */
+  items: z.array(documentItemSchema).nullish()
 });
 
 export const onboardingStepSchema = z.object({ id, name: text(300), done: z.boolean() });
