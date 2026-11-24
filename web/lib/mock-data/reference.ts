@@ -1,5 +1,5 @@
 /* Сгенерировано scripts/gen-seed.mjs из ../download/data.js — справочники (не меняются пользователем). */
-import type { ActivityPoint, ChainTemplate, Channel, Funnel, KnowledgeSource, Stage, SupplyOffer, SupplyRequest, QuizQuestion } from "@/lib/schemas";
+import type { ActivityPoint, ChainTemplate, Channel, Funnel, Integration, KnowledgeSource, Stage, SupplyOffer, SupplyRequest, QuizQuestion } from "@/lib/schemas";
 
 export const CHANNELS: Record<string, Channel> = {
   "telegram": {
@@ -390,5 +390,63 @@ export const SUPPLY_OFFERS: SupplyOffer[] = [
     "price": null,
     "term": "21 дн.",
     "note": "Дольше, дешевле"
+  }
+];
+export const INTEGRATIONS: Integration[] = [
+  {
+    "id": "int-amocrm",
+    "name": "amoCRM",
+    "desc": "Синхронизация сделок и контактов",
+    "connected": true,
+    "icon": "refresh"
+  },
+  {
+    "id": "int-bitrix",
+    "name": "Bitrix24",
+    "desc": "Сделки, задачи, контакты",
+    "connected": true,
+    "icon": "refresh"
+  },
+  {
+    "id": "int-tg",
+    "name": "Telegram",
+    "desc": "Боты и каналы для общения",
+    "connected": true,
+    "icon": "send-paper-plane"
+  },
+  {
+    "id": "int-wa",
+    "name": "WhatsApp",
+    "desc": "Обмен сообщениями с клиентами",
+    "connected": false,
+    "icon": "message-circle"
+  },
+  {
+    "id": "int-cal",
+    "name": "Календари",
+    "desc": "Google / iCal для встреч",
+    "connected": false,
+    "icon": "calendar"
+  },
+  {
+    "id": "int-api",
+    "name": "REST API",
+    "desc": "Программный доступ к платформе",
+    "connected": true,
+    "icon": "code"
+  },
+  {
+    "id": "int-docs",
+    "name": "Документы",
+    "desc": "Шаблоны счётов, КП, актов в PDF",
+    "connected": false,
+    "icon": "file-text"
+  },
+  {
+    "id": "int-phone",
+    "name": "Телефония",
+    "desc": "Звонки и запись разговоров",
+    "connected": false,
+    "icon": "phone"
   }
 ];

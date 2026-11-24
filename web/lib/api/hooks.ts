@@ -22,6 +22,7 @@ export const qk = {
   chainTemplates: ["chainTemplates"] as const,
   supplyRequests: ["supplyRequests"] as const,
   supplyOffers: ["supplyOffers"] as const,
+  integrations: ["integrations"] as const,
   quizzes: ["quizzes"] as const,
   companyProfile: ["companyProfile"] as const,
   courses: ["courses"] as const,
@@ -44,6 +45,7 @@ export const useKnowledgeSources = () => useQuery({ queryKey: qk.knowledgeSource
 export const useChainTemplates = () => useQuery({ queryKey: qk.chainTemplates, queryFn: () => getApi().reference.chainTemplates() });
 export const useSupplyRequests = () => useQuery({ queryKey: qk.supplyRequests, queryFn: () => getApi().reference.supplyRequests() });
 export const useSupplyOffers = () => useQuery({ queryKey: qk.supplyOffers, queryFn: () => getApi().reference.supplyOffers() });
+export const useIntegrations = () => useQuery({ queryKey: qk.integrations, queryFn: () => getApi().reference.integrations() });
 export const useQuizzes = () => useQuery({ queryKey: qk.quizzes, queryFn: () => getApi().reference.quizzes() });
 export const useCompanyProfile = () => useQuery({ queryKey: qk.companyProfile, queryFn: () => getApi().companyProfile.get() });
 export const useCourses = () => useQuery({ queryKey: qk.courses, queryFn: () => getApi().courses.list() });
@@ -278,4 +280,27 @@ export function useShellStats() {
     agentsTotal: agents.data?.length,
     unread: notifications.data?.filter((n) => !n.read).length
   };
+}
+
+/** Экспорт снимка данных (JSON-строка) — «Настройки → Данные». Файл собирает вызывающий компонент. */
+export function useExportData() {
+  return useMutation({ mutationFn: () => getApi().data.exportJSON() });
+}
+
+/** Импорт снимка: после подтверждения адаптером обновляются все запросы (данные заменены целиком). */
+export function useImportData() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (text: string) => getApi().data.importJSON(text),
+    onSettled: () => qc.invalidateQueries()
+  });
+}
+
+/** Сброс к демо-фикстурам: все запросы обновляются после подтверждения адаптером. */
+export function useResetData() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => getApi().data.reset(),
+    onSettled: () => qc.invalidateQueries()
+  });
 }

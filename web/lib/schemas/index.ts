@@ -132,6 +132,9 @@ export const supplyRequestSchema = z.object({
 
 export const supplyOfferSchema = z.object({ supplier: text(300), price: z.number().min(0).nullish(), term: text(60), note: optText });
 
+/** Интеграция раздела «Интеграции» (data.js INTEGRATIONS): справочник карточек со статусом подключения. */
+export const integrationSchema = z.object({ id, name: text(100), desc: text(300), connected: z.boolean(), icon: text(60) });
+
 export const companyProfileSchema = z.object({ name: text(300), about: text(2000), audience: text(2000) });
 
 /** Вопрос демо-теста курса: 2–6 вариантов, один верный (порог — QUIZ_PASS). */
@@ -146,6 +149,7 @@ export type ChainNode = z.infer<typeof chainNodeSchema>;
 export type ChainTemplate = z.infer<typeof chainTemplateSchema>;
 export type SupplyRequest = z.infer<typeof supplyRequestSchema>;
 export type SupplyOffer = z.infer<typeof supplyOfferSchema>;
+export type Integration = z.infer<typeof integrationSchema>;
 export type CompanyProfile = z.infer<typeof companyProfileSchema>;
 export type QuizQuestion = z.infer<typeof quizQuestionSchema>;
 

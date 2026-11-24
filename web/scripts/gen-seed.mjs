@@ -15,7 +15,7 @@ vm.runInNewContext(src, win);
 const D = win.AIWS.data;
 
 const PERSISTED = ["LEADS", "CONVERSATIONS", "DOCUMENTS", "ONBOARDING", "TASKS", "CALENDAR_EVENTS", "NOTIFICATIONS", "AGENTS", "COURSES", "CERTIFICATES", "COMPANY_PROFILE"];
-const REFERENCE = ["CHANNELS", "STAGES", "FUNNELS", "ACTIVITY", "QUIZZES", "KNOWLEDGE_SOURCES", "CHAIN_TEMPLATES", "SUPPLY_REQUESTS", "SUPPLY_OFFERS"];
+const REFERENCE = ["CHANNELS", "STAGES", "FUNNELS", "ACTIVITY", "QUIZZES", "KNOWLEDGE_SOURCES", "CHAIN_TEMPLATES", "SUPPLY_REQUESTS", "SUPPLY_OFFERS", "INTEGRATIONS"];
 // «Описание компании» в прототипе — статичные поля формы (sections2.js storage()); в приложении редактируется, поэтому вынесено в коллекцию
 const COMPANY_PROFILE = { name: "Демо-компания", about: "Демо-описание деятельности для контекста AI-сотрудников.", audience: "Демо: целевая аудитория и ключевые предложения." };
 const json = (v) => JSON.stringify(applyAINaming(v), null, 2);
@@ -31,7 +31,7 @@ export const SEED_DATA: DbSnapshot = ${json(persisted)};
 `);
 fs.writeFileSync(path.join(ROOT, "lib/mock-data/reference.ts"),
 `/* Сгенерировано scripts/gen-seed.mjs из ../download/data.js — справочники (не меняются пользователем). */
-import type { ActivityPoint, ChainTemplate, Channel, Funnel, KnowledgeSource, Stage, SupplyOffer, SupplyRequest, QuizQuestion } from "@/lib/schemas";
+import type { ActivityPoint, ChainTemplate, Channel, Funnel, Integration, KnowledgeSource, Stage, SupplyOffer, SupplyRequest, QuizQuestion } from "@/lib/schemas";
 
 export const CHANNELS: Record<string, Channel> = ${json(D.CHANNELS)};
 export const STAGES: Stage[] = ${json(D.STAGES)};
@@ -43,6 +43,7 @@ export const KNOWLEDGE_SOURCES: KnowledgeSource[] = ${json(D.KNOWLEDGE_SOURCES)}
 export const CHAIN_TEMPLATES: ChainTemplate[] = ${json(D.CHAIN_TEMPLATES)};
 export const SUPPLY_REQUESTS: SupplyRequest[] = ${json(D.SUPPLY_REQUESTS)};
 export const SUPPLY_OFFERS: SupplyOffer[] = ${json(D.SUPPLY_OFFERS)};
+export const INTEGRATIONS: Integration[] = ${json(D.INTEGRATIONS)};
 `);
 console.log("collections:", PERSISTED.map((k) => `${k}=${Array.isArray(D[k]) ? D[k].length : 1}`).join(" "), "| reference:", REFERENCE.map((k) => `${k}=${Array.isArray(D[k]) ? D[k].length : Object.keys(D[k]).length}`).join(" "));
 console.log("sample CHANNELS:", JSON.stringify(D.CHANNELS).slice(0, 160));
