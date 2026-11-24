@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getApi } from "@/lib/api";
-import type { Agent, OnboardingStep } from "@/lib/schemas";
+import type { Agent, Conversation, OnboardingStep } from "@/lib/schemas";
 
 /** Ключи запросов. Все данные приходят через интерфейс Api (localStorage сейчас, REST потом). */
 export const qk = {
@@ -71,6 +71,24 @@ export function useCreateAgent() {
   return useMutation({
     mutationFn: (agent: Agent) => getApi().agents.create(agent),
     onSettled: () => qc.invalidateQueries({ queryKey: qk.agents })
+  });
+}
+
+/** Изменение диалога (режим ИИ/менеджер, новое сообщение): оптимистичное обновление с откатом при ошибке. */
+export function useUpdateConversation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<Conversation> }) => getApi().conversations.update(id, patch),
+    onMutate: async ({ id, patch }) => {
+      await qc.cancelQueries({ queryKey: qk.conversations });
+      const prev = qc.getQueryData<Conversation[]>(qk.conversations);
+      qc.setQueryData<Conversation[]>(qk.conversations, (list) => list?.map((c) => (c.id === id ? { ...c, ...patch, id: c.id } : c)));
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(qk.conversations, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.conversations })
   });
 }
 

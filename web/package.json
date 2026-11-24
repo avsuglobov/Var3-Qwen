@@ -11,11 +11,12 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check:colors": "node scripts/check-hardcoded-colors.mjs",
-    "e2e": "npm run e2e:shell && npm run e2e:overview && npm run e2e:agents",
+    "e2e": "npm run e2e:shell && npm run e2e:overview && npm run e2e:agents && npm run e2e:dialogs",
     "check": "npm run typecheck && npm run lint && npm run test && npm run check:colors",
     "e2e:overview": "node e2e/overview.check.mjs",
     "e2e:shell": "node e2e/shell.check.mjs",
     "e2e:agents": "node e2e/agents.check.mjs",
+    "e2e:dialogs": "node e2e/dialogs.check.mjs",
     "gen:seed": "node scripts/gen-seed.mjs"
   },
   "dependencies": {
