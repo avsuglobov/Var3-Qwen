@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getApi } from "@/lib/api";
-import type { Agent, Conversation, OnboardingStep } from "@/lib/schemas";
+import type { Agent, Conversation, Lead, OnboardingStep } from "@/lib/schemas";
 
 /** Ключи запросов. Все данные приходят через интерфейс Api (localStorage сейчас, REST потом). */
 export const qk = {
@@ -89,6 +89,42 @@ export function useUpdateConversation() {
       if (ctx?.prev) qc.setQueryData(qk.conversations, ctx.prev);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: qk.conversations })
+  });
+}
+
+/** Создание лида в CRM: запись появляется в списке после подтверждения адаптером. */
+export function useCreateLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (lead: Lead) => getApi().leads.create(lead),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.leads })
+  });
+}
+
+/** Перемещение лида на стадию (канбан, инспектор): оптимистичное обновление с откатом при ошибке. */
+export function useMoveLeadStage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<Lead> }) => getApi().leads.update(id, patch),
+    onMutate: async ({ id, patch }) => {
+      await qc.cancelQueries({ queryKey: qk.leads });
+      const prev = qc.getQueryData<Lead[]>(qk.leads);
+      qc.setQueryData<Lead[]>(qk.leads, (list) => list?.map((l) => (l.id === id ? { ...l, ...patch, id: l.id } : l)));
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(qk.leads, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.leads })
+  });
+}
+
+/** Удаление лида (после подтверждения): список обновляется после подтверждения адаптером. */
+export function useDeleteLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => getApi().leads.remove(id),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.leads })
   });
 }
 

@@ -90,7 +90,8 @@ async function main() {
     await page.waitForFunction(() => document.querySelector("[data-testid=chat-thread]")?.getAttribute("data-conv-id") === "cv-2");
     check("второй диалог: «Демо-клиент Е», сразу «Менеджер отвечает», 3 сообщения", /Демо-клиент Е/.test(await page.locator("[data-testid=chat-thread]").innerText()) && (await chipText()) === "Менеджер отвечает" && (await msgs.count()) === 3);
     check("контекст второго диалога: «Кто обратился» и «Следующий шаг» заполнены", (await page.locator("[data-testid=chat-context]").innerText()).includes("Демо-клиент Е") && (await page.locator("[data-testid=chat-context]").innerText()).includes("Оформить возврат менеджером"));
-    check("«Открыть в CRM» ведёт на /crm", (await page.locator("[data-testid=chat-open-crm]").getAttribute("href")) === "/crm");
+    const crmHref = await page.locator("[data-testid=chat-open-crm]").getAttribute("href");
+    check("«Открыть в CRM» ведёт на /crm с лидом этого контакта (Демо-клиент Е → LD-1035)", /^\/crm(\?lead=LD-\d+)?$/.test(crmHref ?? "") && (crmHref ?? "").includes("LD-1035"), crmHref);
 
     // ---------- переименование
     check("переименование: «ИИ-» на странице нет, в сайдбаре «AI-сотрудники»", !(await page.locator("body").innerText()).includes("ИИ-") && /AI-сотрудники/.test(await page.locator("aside nav").innerText()));
