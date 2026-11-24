@@ -6,3 +6,4 @@ test-results/
 next-env.d.ts
 t*.js
 harness.js
+.DS_Store
