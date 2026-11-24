@@ -101,6 +101,15 @@ export function useCreateLead() {
   });
 }
 
+/** Импорт лидов из файла: пакетное создание, список обновляется после подтверждения адаптером. */
+export function useCreateLeads() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (leads: Lead[]) => getApi().leads.createMany(leads),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.leads })
+  });
+}
+
 /** Перемещение лида на стадию (канбан, инспектор): оптимистичное обновление с откатом при ошибке. */
 export function useMoveLeadStage() {
   const qc = useQueryClient();
