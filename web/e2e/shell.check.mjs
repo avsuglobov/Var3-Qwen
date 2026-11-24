@@ -57,7 +57,7 @@ async function main() {
   check("тема: системная тёмная — класс dark выставлен ДО гидратации (нет мигания)", (await page.evaluate(() => window.__cls)).includes("dark"));
   await setTheme("light"); await go("overview");
   check("тема: системная светлая — без класса dark на DOMContentLoaded", !(await page.evaluate(() => window.__cls)).includes("dark"));
-  const tok = async () => page.evaluate(() => { const s = getComputedStyle(document.documentElement); const b = document.querySelector("header button[aria-label^='Открыть поиск']"); return { bg: s.getPropertyValue("--background").trim().toUpperCase(), primary: s.getPropertyValue("--primary").trim().toUpperCase(), bodyBg: getComputedStyle(document.body).backgroundColor, radius: getComputedStyle(b).borderRadius, h1: getComputedStyle(document.querySelector("h1")).fontFamily, body: getComputedStyle(document.body).fontFamily }; });
+  const tok = async () => page.evaluate(() => { const s = getComputedStyle(document.documentElement); const b = document.querySelector("header button[aria-label^='Поиск']"); return { bg: s.getPropertyValue("--background").trim().toUpperCase(), primary: s.getPropertyValue("--primary").trim().toUpperCase(), bodyBg: getComputedStyle(document.body).backgroundColor, radius: getComputedStyle(b).borderRadius, h1: getComputedStyle(document.querySelector("h1")).fontFamily, body: getComputedStyle(document.body).fontFamily }; });
   const L = await tok();
   check("светлая: canvas #FAF7F2, accent #B8431A, радиус 8px, фон body rgb(250,247,242)", L.bg === "#FAF7F2" && L.primary === "#B8431A" && L.radius === "8px" && L.bodyBg === "rgb(250, 247, 242)");
   check("светлая: заголовки — Fraunces/Source Serif, интерфейс — Geist", /fraunces/i.test(L.h1) && /sourceSerifCyr/i.test(L.h1) && /geistLatin/i.test(L.body) && /geistCyr/i.test(L.body));
@@ -92,7 +92,7 @@ async function main() {
 
   // ---------- раскладка верхней панели и логотипа
   await setTheme("dark"); await go("overview");
-  const lay = await page.evaluate(() => { const s = document.querySelector("header button[aria-label^='Открыть поиск']").getBoundingClientRect(); const t = [...document.querySelectorAll("aside .section-label")][0]; return { searchW: Math.round(s.width), tagFits: t.scrollWidth <= t.clientWidth + 1, tagH: Math.round(t.getBoundingClientRect().height), brandH: Math.round(document.querySelector("aside > div").getBoundingClientRect().height) }; });
+  const lay = await page.evaluate(() => { const s = document.querySelector("header button[aria-label^='Поиск']").getBoundingClientRect(); const t = [...document.querySelectorAll("aside .section-label")][0]; return { searchW: Math.round(s.width), tagFits: t.scrollWidth <= t.clientWidth + 1, tagH: Math.round(t.getBoundingClientRect().height), brandH: Math.round(document.querySelector("aside > div").getBoundingClientRect().height) }; });
   check("верхняя панель: поле поиска не сжато (≥ 400px на 1440)", lay.searchW >= 400, String(lay.searchW));
   check("логотип: подпись не обрезана и помещается в шапку сайдбара (тёмная)", lay.tagFits && lay.tagH <= 30 && lay.brandH === 56, JSON.stringify(lay));
   await setTheme("light"); await go("overview");

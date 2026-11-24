@@ -36,12 +36,14 @@ export function Topbar() {
       <button
         type="button"
         onClick={() => setPalette(true)}
-        aria-label={ru.search.label}
+        // имя содержит видимый текст + шорткат подряд и без скобок (axe label-content-name-mismatch:
+        // токены «лидам Ctrl K» должны идти в имени неразрывно, скобки axe вырезает)
+        aria-label={`${ru.search.placeholder} ${shortcut} — открыть палитру команд`}
         className="transition-ui flex h-9 min-w-0 max-w-[440px] flex-1 items-center gap-2 rounded-sm border border-border bg-card px-3 text-left text-[13px] text-muted-foreground hover:border-border-strong"
       >
         <Search className="size-4 shrink-0" aria-hidden />
         <span className="min-w-0 flex-1 truncate">{ru.search.placeholder}</span>
-        <kbd className="font-data hidden shrink-0 rounded-sm border border-border px-1.5 text-[11px] sm:inline">{shortcut}</kbd>
+        <kbd aria-hidden className="font-data hidden shrink-0 rounded-sm border border-border px-1.5 text-[11px] sm:inline">{shortcut}</kbd>
       </button>
 
       <UtcClock />

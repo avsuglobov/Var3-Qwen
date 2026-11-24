@@ -1,7 +1,7 @@
 /** Словарь интерфейса (русский). Все строки — здесь, чтобы позже добавить другие локали. */
 export const ru = {
   skipToContent: "Перейти к содержимому",
-  search: { placeholder: "Поиск по разделам, сотрудникам, лидам…", label: "Открыть поиск и команды", dialogTitle: "Командная палитра", empty: "Ничего не найдено", groupSections: "Разделы", groupActions: "Действия" },
+  search: { placeholder: "Поиск по разделам, сотрудникам, лидам…", dialogTitle: "Командная палитра", empty: "Ничего не найдено", groupSections: "Разделы", groupActions: "Действия" },
   topbar: {
     openMenu: "Открыть меню",
     collapse: "Свернуть меню",
