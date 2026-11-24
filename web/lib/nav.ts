@@ -46,7 +46,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     label: "Клиенты",
     items: [
-      { id: "leads", label: "Лиды и автокасания", description: "Импорт базы и сценарий реактивации", icon: Users, stage: 6 },
+      { id: "leads", label: "Лиды и автокасания", description: "Импорт базы и сценарий реактивации", icon: Users, stage: 3 },
       { id: "docs", label: "Документы и согласование", description: "Счета, КП и акты: шаблоны, очередь согласования, PDF", icon: FileText, stage: 6 }
     ]
   },

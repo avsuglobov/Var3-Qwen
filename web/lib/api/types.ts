@@ -1,4 +1,4 @@
-import type { ActivityPoint, Channel, CollectionName, Funnel, ItemOf, Stage } from "@/lib/schemas";
+import type { ActivityPoint, Channel, CollectionName, Funnel, ItemOf, Lead, Stage } from "@/lib/schemas";
 
 export type ApiErrorCode = "validation" | "not_found" | "duplicate" | "unavailable" | "invalid_import";
 
@@ -27,8 +27,13 @@ export interface ImportResult {
   dropped: number;
 }
 
+/** Репозиторий лидов: дополнительно пакетное создание (импорт файла — одна запись в хранилище вместо сотен). */
+export interface LeadRepository extends Repository<"LEADS"> {
+  createMany(items: Lead[]): Promise<Lead[]>;
+}
+
 export interface Api {
-  leads: Repository<"LEADS">;
+  leads: LeadRepository;
   conversations: Repository<"CONVERSATIONS">;
   documents: Repository<"DOCUMENTS">;
   onboarding: Repository<"ONBOARDING">;

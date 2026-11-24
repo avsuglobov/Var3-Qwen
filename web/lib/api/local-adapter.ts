@@ -109,7 +109,24 @@ export function createLocalApi(options: LocalApiOptions = {}): Api {
   }
 
   return {
-    leads: repo("LEADS"),
+    leads: {
+      ...repo("LEADS"),
+      /** Пакетное создание (импорт файла): валидация каждой записи, одна запись в хранилище вместо сотен. */
+      async createMany(batch) {
+        await guard();
+        const schema = COLLECTION_SCHEMAS.LEADS;
+        const out: ItemOf<"LEADS">[] = [];
+        for (const item of batch) {
+          const r = schema.safeParse(item);
+          if (!r.success) throw new ApiError("validation", `Некорректные данные: ${r.error.issues[0]?.path.join(".") || "запись"}`);
+          out.push(r.data as ItemOf<"LEADS">);
+        }
+        const store = load() as unknown as Record<"LEADS", ItemOf<"LEADS">[]>;
+        store.LEADS = [...store.LEADS, ...out];
+        persist();
+        return clone(out);
+      }
+    },
     conversations: repo("CONVERSATIONS"),
     documents: repo("DOCUMENTS"),
     onboarding: repo("ONBOARDING"),
