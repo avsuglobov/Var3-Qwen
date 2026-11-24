@@ -2,6 +2,7 @@
 
 import { BarChart3, MessagesSquare, Plus, SquareKanban } from "lucide-react";
 import { useEffect, useState } from "react";
+import { CreateDocumentDialog } from "@/components/documents/create-document-dialog";
 import { CrmJournal } from "@/components/crm/crm-journal";
 import { CrmKanban } from "@/components/crm/crm-kanban";
 import { CrmTable } from "@/components/crm/crm-table";
@@ -11,7 +12,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/state";
-import { useAgents, useChannels, useConversations, useCreateLead, useDeleteLead, useFunnels, useLeads, useMoveLeadStage, useStages } from "@/lib/api/hooks";
+import { useAgents, useChannels, useConversations, useCreateLead, useDeleteLead, useDocuments, useFunnels, useLeads, useMoveLeadStage, useStages } from "@/lib/api/hooks";
+import type { Lead } from "@/lib/schemas";
 import {
   VIEW_META,
   filterByStage,
@@ -38,6 +40,7 @@ export function CrmView() {
   const channelsQ = useChannels();
   const agentsQ = useAgents();
   const conversationsQ = useConversations();
+  const documentsQ = useDocuments();
   const moveStage = useMoveLeadStage();
   const createLead = useCreateLead();
   const removeLead = useDeleteLead();
@@ -49,6 +52,8 @@ export function CrmView() {
   const [sort, setSort] = useState<TableSort>("id");
   const [createOpen, setCreateOpen] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  /** Лид, по которому открывается «Создать документ» (кнопка «Документ» инспектора). */
+  const [docFor, setDocFor] = useState<Lead | null>(null);
   const [feedback, setFeedback] = useState<{ text: string; kind: "status" | "alert" }>({ text: "", kind: "status" });
 
   // Deep-link из диалогов и внешних ссылок: /crm?lead=…&funnel=…&view=… (после монтирования, без влияния на hydration).
@@ -139,6 +144,7 @@ export function CrmView() {
             );
           }}
           onDelete={(lead) => setDeleting(lead.id)}
+          onMakeDoc={(lead) => setDocFor(lead)}
           onFeedback={onFeedback}
         />
       ) : view === "kanban" ? (
@@ -190,6 +196,16 @@ export function CrmView() {
           setView("journal");
           onFeedback(`Лид создан: ${lead.id}`);
         }}
+      />
+      <CreateDocumentDialog
+        open={docFor !== null}
+        onOpenChange={(next) => {
+          if (!next) setDocFor(null);
+        }}
+        docs={documentsQ.data ?? []}
+        clients={leads.map((l) => l.name)}
+        defaultClient={docFor?.name}
+        onCreated={() => onFeedback("Документ создан")}
       />
       <LeadDeleteDialog
         lead={deletingLead}
