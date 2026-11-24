@@ -120,6 +120,35 @@ export const certificateSchema = z.object({
   id, name: text(120), course: text(300), date: text(60), score: z.number().min(0).max(1).nullish()
 });
 
+/* Разделы «Хранилище», «Команда», «Снабжение», «Обучение» (этап 3, группа 7). */
+export const knowledgeSourceSchema = z.object({ id, type: optText, name: text(300), status: optText });
+
+export const chainNodeSchema = z.object({ role: text(60), name: text(300) });
+export const chainTemplateSchema = z.object({ id, name: text(120), nodes: z.array(chainNodeSchema).min(1) });
+
+export const supplyRequestSchema = z.object({
+  id, item: text(300), suppliers: z.number().int().min(0).max(1000), replies: z.number().int().min(0).max(1000), status: optText
+});
+
+export const supplyOfferSchema = z.object({ supplier: text(300), price: z.number().min(0).nullish(), term: text(60), note: optText });
+
+export const companyProfileSchema = z.object({ name: text(300), about: text(2000), audience: text(2000) });
+
+/** Вопрос демо-теста курса: 2–6 вариантов, один верный (порог — QUIZ_PASS). */
+export const quizQuestionSchema = z.object({
+  q: text(500),
+  options: z.array(text(300)).min(2).max(6),
+  answer: z.number().int().min(0).max(5)
+});
+
+export type KnowledgeSource = z.infer<typeof knowledgeSourceSchema>;
+export type ChainNode = z.infer<typeof chainNodeSchema>;
+export type ChainTemplate = z.infer<typeof chainTemplateSchema>;
+export type SupplyRequest = z.infer<typeof supplyRequestSchema>;
+export type SupplyOffer = z.infer<typeof supplyOfferSchema>;
+export type CompanyProfile = z.infer<typeof companyProfileSchema>;
+export type QuizQuestion = z.infer<typeof quizQuestionSchema>;
+
 /* ---------------------------------------------------------------- типы */
 export type Channel = z.infer<typeof channelSchema>;
 export type Stage = z.infer<typeof stageSchema>;
@@ -138,7 +167,6 @@ export type ApprovalRule = z.infer<typeof approvalRuleSchema>;
 export type Agent = z.infer<typeof agentSchema>;
 export type Course = z.infer<typeof courseSchema>;
 export type Certificate = z.infer<typeof certificateSchema>;
-
 /* ---------------------------------------------------------------- коллекции и снимок хранилища */
 export const COLLECTION_SCHEMAS = {
   LEADS: leadSchema,
@@ -152,6 +180,9 @@ export const COLLECTION_SCHEMAS = {
   COURSES: courseSchema,
   CERTIFICATES: certificateSchema
 } as const;
+
+/** COMPANY_PROFILE — одиночная запись (объект, без id): валидируется companyProfileSchema отдельно (load/import/API). */
+export const COMPANY_PROFILE_SCHEMA = companyProfileSchema;
 
 export type CollectionName = keyof typeof COLLECTION_SCHEMAS;
 export const COLLECTION_NAMES = Object.keys(COLLECTION_SCHEMAS) as CollectionName[];
@@ -167,6 +198,7 @@ export interface DbSnapshot {
   AGENTS: Agent[];
   COURSES: Course[];
   CERTIFICATES: Certificate[];
+  COMPANY_PROFILE: CompanyProfile;
 }
 
 export type ItemOf<K extends CollectionName> = DbSnapshot[K][number];

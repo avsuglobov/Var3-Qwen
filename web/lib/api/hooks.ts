@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getApi } from "@/lib/api";
-import type { Agent, Conversation, Document, Lead, OnboardingStep, Task } from "@/lib/schemas";
+import type { Agent, CompanyProfile, Conversation, Document, Lead, OnboardingStep, Task } from "@/lib/schemas";
 
 /** Ключи запросов. Все данные приходят через интерфейс Api (localStorage сейчас, REST потом). */
 export const qk = {
@@ -17,7 +17,15 @@ export const qk = {
   stages: ["stages"] as const,
   channels: ["channels"] as const,
   tasks: ["tasks"] as const,
-  calendarEvents: ["calendarEvents"] as const
+  calendarEvents: ["calendarEvents"] as const,
+  knowledgeSources: ["knowledgeSources"] as const,
+  chainTemplates: ["chainTemplates"] as const,
+  supplyRequests: ["supplyRequests"] as const,
+  supplyOffers: ["supplyOffers"] as const,
+  quizzes: ["quizzes"] as const,
+  companyProfile: ["companyProfile"] as const,
+  courses: ["courses"] as const,
+  certificates: ["certificates"] as const
 };
 
 export const useLeads = () => useQuery({ queryKey: qk.leads, queryFn: () => getApi().leads.list() });
@@ -32,6 +40,36 @@ export const useStages = () => useQuery({ queryKey: qk.stages, queryFn: () => ge
 export const useChannels = () => useQuery({ queryKey: qk.channels, queryFn: () => getApi().reference.channels() });
 export const useTasks = () => useQuery({ queryKey: qk.tasks, queryFn: () => getApi().tasks.list() });
 export const useCalendarEvents = () => useQuery({ queryKey: qk.calendarEvents, queryFn: () => getApi().calendarEvents.list() });
+export const useKnowledgeSources = () => useQuery({ queryKey: qk.knowledgeSources, queryFn: () => getApi().reference.knowledgeSources() });
+export const useChainTemplates = () => useQuery({ queryKey: qk.chainTemplates, queryFn: () => getApi().reference.chainTemplates() });
+export const useSupplyRequests = () => useQuery({ queryKey: qk.supplyRequests, queryFn: () => getApi().reference.supplyRequests() });
+export const useSupplyOffers = () => useQuery({ queryKey: qk.supplyOffers, queryFn: () => getApi().reference.supplyOffers() });
+export const useQuizzes = () => useQuery({ queryKey: qk.quizzes, queryFn: () => getApi().reference.quizzes() });
+export const useCompanyProfile = () => useQuery({ queryKey: qk.companyProfile, queryFn: () => getApi().companyProfile.get() });
+export const useCourses = () => useQuery({ queryKey: qk.courses, queryFn: () => getApi().courses.list() });
+export const useCertificates = () => useQuery({ queryKey: qk.certificates, queryFn: () => getApi().certificates.list() });
+
+/** Завершение курса выдачей сертификата: курсы и список сертификатов обновляются после подтверждения адаптером. */
+export function useCompleteCourse() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ courseId, name, score }: { courseId: string; name: string; score: number }) =>
+      getApi().courses.complete(courseId, { name, score }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: qk.courses });
+      qc.invalidateQueries({ queryKey: qk.certificates });
+    }
+  });
+}
+
+/** Сохранение описания компании в «Хранилище». */
+export function useSaveCompanyProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Partial<CompanyProfile>) => getApi().companyProfile.update(patch),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.companyProfile })
+  });
+}
 
 /** Отметка шага онбординга: оптимистичное обновление с откатом при ошибке. */
 export function useToggleOnboarding() {

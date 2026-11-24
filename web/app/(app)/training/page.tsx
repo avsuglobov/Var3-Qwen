@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { PagePlaceholder } from "@/components/layout/page-placeholder";
+import { TrainingView } from "@/components/training/training-view";
 
 export const metadata: Metadata = { title: "Обучение" };
 
+/** Раздел «Обучение»: курсы с прогрессом, демо-тесты, сертификаты (PDF). */
 export default function Page() {
-  return <PagePlaceholder id="training" />;
+  return <TrainingView />;
 }

@@ -47,7 +47,7 @@ export function TaskBoard({
       <div className="overflow-x-auto pb-2" data-testid="tasks-board">
         <div className="grid min-w-max grid-flow-col auto-cols-[minmax(240px,1fr)] items-start gap-3.5">
           {PRIORITIES.map((p) => (
-            <TaskColumn key={p.id} priority={p.id} label={p.label} tone={p.tone} tasks={tasks} onMove={onMove} onToggle={onToggle} />
+            <TaskColumn key={p.id} priority={p.id} label={p.label} tone={p.tone} tasks={tasks} onToggle={onToggle} />
           ))}
         </div>
       </div>
@@ -63,14 +63,12 @@ function TaskColumn({
   label,
   tone,
   tasks,
-  onMove,
   onToggle
 }: {
   priority: TaskPriority;
   label: string;
   tone: "critical" | "accent" | "muted";
   tasks: readonly Task[];
-  onMove: (taskId: string, toPriority: TaskPriority) => void;
   onToggle: (task: Task) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: priority });
@@ -95,14 +93,14 @@ function TaskColumn({
         {items.length === 0 ? (
           <div className="px-2 py-6 text-center text-[11.5px] text-muted-foreground">Перетащите карточку сюда</div>
         ) : (
-          items.map((t) => <TaskCard key={t.id} task={t} onMove={onMove} onToggle={onToggle} />)
+          items.map((t) => <TaskCard key={t.id} task={t} onToggle={onToggle} />)
         )}
       </div>
     </div>
   );
 }
 
-function TaskCard({ task, onMove, onToggle }: { task: Task; onMove: (taskId: string, toPriority: TaskPriority) => void; onToggle: (task: Task) => void }) {
+function TaskCard({ task, onToggle }: { task: Task; onToggle: (task: Task) => void }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id, data: { priority: task.priority } });
   return (
     <div

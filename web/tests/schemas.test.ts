@@ -4,7 +4,7 @@ import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 import { ACTIVITY, CHANNELS, FUNNELS, STAGES } from "@/lib/mock-data/reference";
 import { SEED_DATA } from "@/lib/mock-data/seed";
-import { CHANNEL_IDS, COLLECTION_NAMES, ID_RE, agentSchema, certificateSchema, courseSchema, leadSchema, parseCollection } from "@/lib/schemas";
+import { CHANNEL_IDS, COMPANY_PROFILE_SCHEMA, COLLECTION_NAMES, ID_RE, agentSchema, certificateSchema, courseSchema, leadSchema, parseCollection } from "@/lib/schemas";
 import { ROOT } from "./helpers";
 import { applyAINaming } from "../scripts/ai-naming.mjs";
 
@@ -55,6 +55,9 @@ describe("схемы принимают весь демо-набор (парит
       expect(r?.items).toHaveLength(SEED_DATA[name].length);
     });
   }
+  it("COMPANY_PROFILE: одиночная запись валидна схемой (объект, без id)", () => {
+    expect(COMPANY_PROFILE_SCHEMA.safeParse(SEED_DATA.COMPANY_PROFILE).success).toBe(true);
+  });
 });
 
 describe("безопасный id (id попадает в атрибуты и URL)", () => {
