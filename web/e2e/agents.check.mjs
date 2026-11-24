@@ -3,10 +3,9 @@
    переименование «ИИ-» → «AI-», состояния loading/empty/error/success, overflow, контраст, консоль.
    Запуск: npm run build && node e2e/agents.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { BASE, launch, reporter, startServer, waitReady } from "./lib/harness.mjs";
+import { apiReset, BASE, importSnapshot, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
 
 const { check, done } = reporter();
-const KEY = "aiws-db-v2";
 
 async function main() {
   const server = startServer();
@@ -17,24 +16,27 @@ async function main() {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await ctx.newPage();
     const problems = [], hosts = new Set();
-    page.on("console", (m) => { if (["error", "warning"].includes(m.type())) problems.push(m.type() + ": " + m.text().slice(0, 200)); });
+    // 503 от панели сбоев — намеренный ответ сервера, в консоль браузера пишется как «Failed to load resource»; не ошибка приложения
+    page.on("console", (m) => { if (["error", "warning"].includes(m.type()) && !/Failed to load resource.*status of 503/.test(m.text())) problems.push(m.type() + ": " + m.text().slice(0, 200)); });
     page.on("pageerror", (e) => problems.push("pageerror: " + String(e).slice(0, 200)));
     page.on("request", (r) => { try { hosts.add(new URL(r.url()).host); } catch { /* data: */ } });
 
     const origin = async () => { if (!page.url().startsWith("http")) await page.goto(BASE + "/agents", { waitUntil: "networkidle" }); };
     const prepare = async (fn, arg) => { await origin(); await page.evaluate(fn, arg); };
-    const reset = () => prepare(() => localStorage.clear());
+    const reset = async () => { await apiReset(); await prepare(() => localStorage.clear()); };
     const open = async (url = "/agents") => { await page.goto(BASE + url, { waitUntil: "networkidle" }); await page.waitForSelector("[data-testid=agents-grid], main [role=alert], [data-testid=agents-empty], [data-testid=agent-tab]"); };
     const cards = page.locator("[data-testid=agent-card]");
     const text = (sel) => page.locator(sel).innerText();
 
     // ---------- loading: скелетоны, затем данные
-    await reset(); await prepare(() => localStorage.setItem("aiws-mock-latency", "1500"));
+    await reset(); await setFaults({ latencyMs: 1500 });
     await page.goto(BASE + "/agents", { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[aria-busy=true]");
     check("loading: показаны скелетоны, карточек ещё нет", (await page.locator("[aria-busy=true]").count()) >= 1 && (await cards.count()) === 0);
     await page.waitForSelector("[data-testid=agent-card]", { timeout: 8000 });
+    await waitFor(async () => (await page.locator("[aria-busy=true]").count()) === 0, { timeout: 10000 });
     check("loading → success: скелетоны исчезли, 5 сотрудников", (await page.locator("[aria-busy=true]").count()) === 0 && (await cards.count()) === 5);
+    await setFaults({ latencyMs: 0 });
 
     // ---------- success: демо-данные и переименование
     await reset(); await open();
@@ -66,7 +68,7 @@ async function main() {
     check("мастер: каналы применены (Email есть, Telegram нет)", /Email/.test(await cards.nth(5).innerText()) && !/Telegram/.test(await cards.nth(5).innerText()));
     check("мастер: воронка не назначена («—»)", /Воронка: —/.test(await cards.nth(5).innerText()));
     await page.reload({ waitUntil: "networkidle" }); await page.waitForSelector("[data-testid=agent-card]");
-    check("мастер: сотрудник сохранён в этом браузере (после перезагрузки)", (await cards.count()) === 6 && /Тест Продажи/.test(await cards.nth(5).innerText()));
+    check("мастер: сотрудник сохранён на сервере (после перезагрузки)", (await cards.count()) === 6 && /Тест Продажи/.test(await cards.nth(5).innerText()));
 
     // ---------- карточка сотрудника: вкладки нового сотрудника открываются без ошибок
     await cards.nth(5).getByRole("link", { name: "Открыть" }).click();
@@ -93,13 +95,13 @@ async function main() {
     await page.waitForSelector("[data-testid=instruction-saved]");
     check("инструкция: сохранение подтверждается статусом", (await page.locator("[data-testid=instruction-saved]").innerText()) === "Инструкция сохранена");
     await page.reload({ waitUntil: "networkidle" }); await page.waitForSelector("[data-testid=agent-tab]");
-    check("инструкция: сохраняется после перезагрузки", /Новая инструкция для теста/.test(await text("[data-testid=agent-tab]")));
+    check("инструкция: сохраняется после перезагрузки (на сервере)", /Новая инструкция для теста/.test(await text("[data-testid=agent-tab]")));
     // пауза и возобновление с сохранением
     await page.locator("[data-testid=agent-pause]").click();
     await page.waitForTimeout(600);
     check("пауза: статус «Не в сети», кнопка «Возобновить»", (await page.locator("[data-testid=agent-status]").innerText()).includes("Не в сети") && /Возобновить/.test(await text("[data-testid=agent-pause]")));
     await page.reload({ waitUntil: "networkidle" }); await page.waitForSelector("[data-testid=agent-status]");
-    check("пауза: сохраняется после перезагрузки", (await page.locator("[data-testid=agent-status]").innerText()).includes("Не в сети"));
+    check("пауза: сохраняется после перезагрузки (на сервере)", (await page.locator("[data-testid=agent-status]").innerText()).includes("Не в сети"));
     check("шапка: «2 / 6 агентов» после паузы и создания (считаются только «В сети»)", /2\s*\/\s*6\s*агентов/.test(await text("header.sticky")));
     await page.locator("[data-testid=agent-pause]").click();
     await page.waitForTimeout(600);
@@ -126,14 +128,14 @@ async function main() {
     check("тест-чат: скриптованный ответ по ключевому слову «тариф»", /каталог тарифов/.test(await text("[data-testid=agent-test-chat]")));
 
     // ---------- empty
-    await reset(); await prepare((k) => localStorage.setItem(k, JSON.stringify({ version: 1, AGENTS: [] })), KEY); await open();
+    await reset(); await importSnapshot({ version: 1, AGENTS: [] }); await open();
     check("empty: «Сотрудников пока нет» и подсказка", /Сотрудников пока нет/.test(await text("main")) && /Создайте первого/.test(await text("main")));
 
     // ---------- error → повтор
-    await reset(); await prepare(() => localStorage.setItem("aiws-mock-fail", "1")); await open();
+    await reset(); await setFaults({ fail: true }); await open();
     await page.waitForSelector("main [role=alert]");
     check("error: «Не удалось загрузить данные» с «Повторить»", /Не удалось загрузить данные/.test(await text("main")) && /имитация сбоя/.test(await text("main")));
-    await page.evaluate(() => localStorage.removeItem("aiws-mock-fail"));
+    await setFaults({ fail: false });
     await page.locator("main [role=alert] button").first().click();
     await page.waitForSelector("[data-testid=agent-card]", { timeout: 8000 });
     check("error → «Повторить» восстанавливает список (5 карточек)", (await cards.count()) === 5);

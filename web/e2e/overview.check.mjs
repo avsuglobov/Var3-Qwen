@@ -2,10 +2,9 @@
    онбординг (мышь, клавиатура, сохранение), журнал, повреждённое хранилище, overflow, контраст, консоль.
    Запуск: npm run build && node e2e/overview.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { BASE, launch, reporter, startServer, waitReady } from "./lib/harness.mjs";
+import { apiReset, BASE, importSnapshot, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
 
 const { check, done } = reporter();
-const KEY = "aiws-db-v2";
 
 async function main() {
   const server = startServer();
@@ -16,25 +15,28 @@ async function main() {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await ctx.newPage();
     const problems = [], hosts = new Set();
-    page.on("console", (m) => { if (["error", "warning"].includes(m.type())) problems.push(m.type() + ": " + m.text().slice(0, 200)); });
+    // 503 от панели сбоев — намеренный ответ сервера; браузер пишет его в консоль как «Failed to load resource», это не ошибка приложения
+    page.on("console", (m) => { if (["error", "warning"].includes(m.type()) && !/Failed to load resource.*status of 503/.test(m.text())) problems.push(m.type() + ": " + m.text().slice(0, 200)); });
     page.on("pageerror", (e) => problems.push("pageerror: " + String(e).slice(0, 200)));
     page.on("request", (r) => { try { hosts.add(new URL(r.url()).host); } catch { /* data: */ } });
 
     const origin = async () => { if (!page.url().startsWith("http")) await page.goto(BASE + "/help", { waitUntil: "networkidle" }); };
     const prepare = async (fn, arg) => { await origin(); await page.evaluate(fn, arg); };
-    const reset = () => prepare(() => localStorage.clear());
+    const reset = async () => { await apiReset(); await prepare(() => localStorage.clear()); };
     const open = async () => { await page.goto(BASE + "/overview", { waitUntil: "networkidle" }); await page.waitForSelector("[data-testid=journal]"); };
     const kpi = (label) => page.locator(`[data-kpi="${label}"]`);
     const text = (sel) => page.locator(sel).innerText();
 
     // ---------- loading: скелетоны и заглушки в шапке, затем данные
-    await reset(); await prepare(() => localStorage.setItem("aiws-mock-latency", "1500"));
+    await reset(); await setFaults({ latencyMs: 1500 });
     await page.goto(BASE + "/overview", { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[aria-busy=true]");
     check("loading: показаны скелетоны (aria-busy), KPI ещё нет", (await page.locator("[aria-busy=true]").count()) >= 2 && (await page.locator("[data-kpi]").count()) === 0);
     check("loading: в шапке «— / — агентов», а не выдуманные числа", /—\s*\/\s*—\s*агентов/.test(await text("header.sticky")));
-    await page.waitForSelector("[data-kpi]", { timeout: 8000 }); await page.waitForSelector("[data-testid=journal] li");
+    // при latency запросы страницы (больше 6 — лимит HTTP-соединений) доезжают не одновременно: ждём и снятия busy, и KPI
+    await waitFor(async () => (await page.locator("[aria-busy=true]").count()) === 0 && (await page.locator("[data-kpi]").count()) === 4, { timeout: 10000 });
     check("loading → success: скелетоны исчезли, KPI показаны", (await page.locator("[aria-busy=true]").count()) === 0 && (await page.locator("[data-kpi]").count()) === 4);
+    await setFaults({ latencyMs: 0 });
 
     // ---------- success: демо-данные
     await reset(); await open();
@@ -74,32 +76,36 @@ async function main() {
     check("журнал: время моно-шрифтом (tabular-nums)", await page.evaluate(() => /mono|geist|jetbrains/i.test(getComputedStyle(document.querySelector("[data-testid=journal] time")).fontFamily)));
 
     // ---------- empty
-    await reset(); await prepare((k) => localStorage.setItem(k, JSON.stringify({ version: 1, LEADS: [], DOCUMENTS: [], CONVERSATIONS: [], ONBOARDING: [] })), KEY); await open();
+    await reset(); await importSnapshot({ version: 1, LEADS: [], DOCUMENTS: [], CONVERSATIONS: [], ONBOARDING: [] }); await open();
     const empties = await Promise.all(["Лиды за период", "Созданные счета", "Сообщения от ИИ", "Передано менеджеру"].map((l) => kpi(l).innerText()));
     check("empty: все KPI показывают «—» и подсказку, что делать", empties.every((t) => t.includes("—")) && /Лиды появятся после подключения каналов/.test(empties[0]) && /Подключите канал/.test(empties[2]));
     check("empty: онбординг и журнал — понятные пустые состояния", /Шагов пока нет/.test(await text("[data-testid=onboarding]")) && /Событий пока нет/.test(await text("[data-testid=journal]")));
     check("empty: шапка не ломается (агенты и уведомления из своих коллекций)", /3\s*\/\s*5\s*агентов/.test(await text("header.sticky")));
 
     // ---------- error → повтор
-    await reset(); await prepare(() => localStorage.setItem("aiws-mock-fail", "1")); await open();
+    await reset(); await setFaults({ fail: true }); await open();
     await page.waitForSelector("main [role=alert]");
     const alerts = await page.locator("main [role=alert]").count();
     check("error: ошибка в каждой карточке (сводка, график, онбординг, журнал) с понятным текстом", alerts >= 4 && /Не удалось загрузить данные/.test(await text("main")) && /имитация сбоя/.test(await text("main")), String(alerts));
     check("error: в шапке «— / —», страница не пуста", /—\s*\/\s*—/.test(await text("header.sticky")) && (await page.locator("aside nav a").count()) === 16);
-    await page.evaluate(() => localStorage.removeItem("aiws-mock-fail"));
+    await setFaults({ fail: false });
     for (let i = 0; i < 6 && (await page.locator("main [role=alert] button").count()) > 0; i++) { await page.locator("main [role=alert] button").first().click(); await page.waitForTimeout(700); }
     check("error → «Повторить» восстанавливает все карточки", (await page.locator("main [role=alert]").count()) === 0 && (await page.locator("[data-kpi]").count()) === 4 && (await rows.count()) === 8);
 
     // ---------- повреждённое хранилище
-    await reset(); await prepare((k) => { const s = { version: 1, LEADS: "oops", ONBOARDING: [{ id: "x\"><b id=\"pwn\">", name: "x", done: true }] }; localStorage.setItem(k, JSON.stringify(s)); }, KEY); await open();
-    check("повреждённое хранилище: приложение стартует, лиды — демо, XSS-запись отброшена", (await kpi("Лиды за период").innerText()).includes("6") && (await page.locator("#pwn").count()) === 0 && (await steps.count()) === 7);
+    await reset(); await setFaults({ corrupt: true }); await open();
+    check("повреждённый файл хранилища: приложение стартует, лиды — демо, XSS-запись отброшена", (await kpi("Лиды за период").innerText()).includes("6") && (await page.locator("#pwn").count()) === 0 && (await steps.count()) === 7);
 
     // ---------- кнопка «Обновить»
-    await reset(); await prepare(() => localStorage.setItem("aiws-mock-latency", "1200")); await open();
+    await reset(); await setFaults({ latencyMs: 1200 }); await open();
     await page.getByRole("button", { name: "Обновить" }).click();
-    check("«Обновить»: во время обновления aria-busy=true, затем false", (await page.getByRole("button", { name: "Обновить" }).getAttribute("aria-busy")) === "true");
-    await page.waitForTimeout(2200);
+    // инвалидация асинхронна: busy становится true, когда запросы фактически стартовали
+    await waitFor(async () => (await page.getByRole("button", { name: "Обновить" }).getAttribute("aria-busy")) === "true", { timeout: 2000 }).catch(() => {});
+    check("«Обновить»: во время обновления aria-busy=true", (await page.getByRole("button", { name: "Обновить" }).getAttribute("aria-busy")) === "true");
+    // 8 запросов при latency 1200 мс не влезают в 6 HTTP-соединений: завершение может занять ~2×1200 мс — ждём фактического снятия busy
+    await waitFor(async () => (await page.getByRole("button", { name: "Обновить" }).getAttribute("aria-busy")) === "false", { timeout: 10000 }).catch(() => {});
     check("«Обновить»: завершается", (await page.getByRole("button", { name: "Обновить" }).getAttribute("aria-busy")) === "false");
+    await setFaults({ latencyMs: 0 });
 
     // ---------- overflow и контраст (обе темы)
     await reset(); await open();

@@ -12,7 +12,7 @@ export class ApiError extends Error {
   }
 }
 
-/** Репозиторий коллекции. Реализации: localStorage (сейчас), REST/MSW (этап 10) — интерфейс общий.
+/** Репозиторий коллекции. Реализации: REST-маршруты `app/api/*` (этап 4, основной) и localStorage (офлайн-вариант и тесты) — интерфейс общий.
  *  COMPANY_PROFILE — одиночная запись (объект), доступна через `api.companyProfile`, а не репозиторий. */
 export interface Repository<K extends Exclude<CollectionName, "COMPANY_PROFILE">> {
   list(): Promise<ItemOf<K>[]>;

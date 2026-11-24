@@ -1,5 +1,5 @@
 /* ops.check.mjs — браузерные проверки разделов «Хранилище», «Команда», «Снабжение», «Аналитика»
-   (этап 3, группа 7). Хранилище: описание компании сохраняется в localStorage и переживает
+   (этап 3, группа 7). Хранилище: описание компании сохраняется на сервере и переживает
    перезагрузку, переключатель «Искать в интернете» (role=switch, клавиатура), таблица источников
    (типы PDF/Word/Excel/Сайт/API, бейдж «Индексировано» с точкой). Команда: шаблоны-чипы
    (Услуги/Производство), цепочка узлов со стрелками, подсказка о передаче результата.
@@ -9,7 +9,7 @@
    Overflow 375…1920 × 2 темы, контраст AA, внешние запросы, консоль.
    Запуск: npm run build && node e2e/ops.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { BASE, launch, reporter, startServer, waitReady } from "./lib/harness.mjs";
+import { apiProfile, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
 
 const { check, done } = reporter();
 
@@ -28,7 +28,7 @@ async function main() {
 
     const origin = async () => { if (!page.url().startsWith("http")) await page.goto(BASE + "/storage", { waitUntil: "networkidle" }); };
     const prepare = async (fn, arg) => { await origin(); await page.evaluate(fn, arg); };
-    const reset = () => prepare(() => localStorage.clear());
+    const reset = async () => { await apiReset(); await prepare(() => localStorage.clear()); };
     const open = async (url = "/storage") => {
       const waitSel = { "/storage": "[data-testid=storage-table]", "/team": "[data-testid=team-chain]", "/supply": "[data-testid=supply-requests]", "/analytics": "[data-testid=analytics-review]" }[url];
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -41,21 +41,23 @@ async function main() {
         }
       }
     };
-    const profileOf = () => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").COMPANY_PROFILE || null; } catch { return null; } });
+    const profileOf = () => apiProfile();
 
     // ================= Хранилище
-    await reset(); await prepare(() => localStorage.setItem("aiws-mock-latency", "1500"));
+    await reset(); await setFaults({ latencyMs: 1500 });
     await page.goto(BASE + "/storage", { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[aria-busy=true]");
     check("loading: скелетоны показаны, таблицы ещё нет", (await page.locator("[aria-busy=true]").count()) >= 1 && (await page.locator("[data-testid=storage-table]").count()) === 0);
     await page.waitForSelector("[data-testid=storage-table]", { timeout: 8000 });
+    await waitFor(async () => (await page.locator("[aria-busy=true]").count()) === 0, { timeout: 10000 });
     check("loading → success: карточки и источники заполнены", (await page.locator("[aria-busy=true]").count()) === 0 && (await page.locator("[data-testid=storage-row]").count()) === 5);
+    await setFaults({ latencyMs: 0 });
     check("шапка: «Хранилище и база знаний», «Описание компании и источники знаний»", (await page.locator("h1").innerText()) === "Хранилище и база знаний" && /Описание компании и источники знаний/.test(await page.locator("main").innerText()));
     check("форма заполнена демо-профилем: «Демо-компания»", (await page.locator("[data-testid=storage-name]").inputValue()) === "Демо-компания");
     await page.locator("[data-testid=storage-name]").fill("ООО «Демо-торг»");
     await page.locator("[data-testid=storage-save]").click();
     await page.waitForTimeout(400);
-    check("«Сохранить описание»: «Описание сохранено», записано в localStorage", (await page.locator("[data-testid=storage-feedback]").innerText()).includes("Описание сохранено") && (await profileOf())?.name === "ООО «Демо-торг»");
+    check("«Сохранить описание»: «Описание сохранено», записано на сервере", (await page.locator("[data-testid=storage-feedback]").innerText()).includes("Описание сохранено") && (await profileOf())?.name === "ООО «Демо-торг»");
     await open();
     check("перезагрузка: имя компании сохранено", (await page.locator("[data-testid=storage-name]").inputValue()) === "ООО «Демо-торг»");
     const sw = page.locator("[data-testid=storage-websearch]");

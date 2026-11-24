@@ -5,7 +5,7 @@
    переименование «ИИ-» → «AI-», overflow 375…1920 × 2 темы, контраст, консоль.
    Запуск: npm run build && node e2e/crm.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { BASE, launch, reporter, startServer, waitReady } from "./lib/harness.mjs";
+import { apiItems, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
 
 const { check, done } = reporter();
 
@@ -24,14 +24,16 @@ async function main() {
 
     const origin = async () => { if (!page.url().startsWith("http")) await page.goto(BASE + "/crm", { waitUntil: "networkidle" }); };
     const prepare = async (fn, arg) => { await origin(); await page.evaluate(fn, arg); };
-    const reset = () => prepare(() => localStorage.clear());
+    const reset = async () => { await apiReset(); await prepare(() => localStorage.clear()); };
     const open = async (url = "/crm") => { await page.goto(BASE + url, { waitUntil: "networkidle" }); await page.waitForSelector("[data-testid=crm-journal-card], [data-testid=crm-kanban], [data-testid=crm-table], main [role=alert]"); };
-    const storageLeads = () => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").LEADS || []; } catch { return []; } });
+    const storageLeads = () => apiItems("leads");
     const switchView = async (v) => { await page.locator(`[data-testid=crm-view-switch][data-view=${v}]`).click(); await page.waitForSelector(v === "journal" ? "[data-testid=crm-journal-card]" : v === "kanban" ? "[data-testid=crm-kanban]" : "[data-testid=crm-table]"); };
     // dnd-kit активируется последовательными pointermove: один прыжок (dragTo) сенсор не поднимает
     const dragCard = async (leadId, toStage) => {
       const card = page.locator(`[data-testid=crm-kanban-card][data-lead=${leadId}]`);
       const col = page.locator(`[data-testid=crm-kanban-col][data-stage=${toStage}]`);
+      // после предыдущего dnd канбан перерисовывается (refetch) — карточка на миг отвязана, ждём её возврата
+      await card.waitFor({ state: "visible", timeout: 8000 });
       const box = await card.boundingBox(), tbox = await col.boundingBox();
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       await page.mouse.down();
@@ -46,12 +48,14 @@ async function main() {
     };
 
     // ---------- loading: скелетоны, затем данные
-    await reset(); await prepare(() => localStorage.setItem("aiws-mock-latency", "1500"));
+    await reset(); await setFaults({ latencyMs: 1500 });
     await page.goto(BASE + "/crm", { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[aria-busy=true]");
     check("loading: показаны скелетоны, данных ещё нет", (await page.locator("[aria-busy=true]").count()) >= 1 && (await page.locator("[data-testid=crm-journal-card]").count()) === 0);
     await page.waitForSelector("[data-testid=crm-journal-card]", { timeout: 8000 });
+    await waitFor(async () => (await page.locator("[aria-busy=true]").count()) === 0, { timeout: 10000 });
     check("loading → success: скелетоны исчезли, журнал с событиями", (await page.locator("[aria-busy=true]").count()) === 0 && (await page.locator("[data-testid=crm-journal-row]").count()) > 0);
+    await setFaults({ latencyMs: 0 });
 
     // ---------- журнал: вид по умолчанию, инспектор первого лида воронки
     await reset(); await open();
@@ -63,12 +67,12 @@ async function main() {
 
     // ---------- смена стадии списком в инспекторе
     await page.locator("[data-testid=crm-lead-stage-select]").selectOption("work");
-    await page.waitForFunction(() => { try { return (JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").LEADS || []).find((l) => l.id === "LD-1042")?.stageId === "work"; } catch { return false; } }, undefined, { timeout: 8000 });
+    await waitFor(async () => (await storageLeads()).find((l) => l.id === "LD-1042")?.stageId === "work");
     const moved = await storageLeads();
     check("стадия изменена: событие «Перемещён в стадию «В работе»», активность обновлена", (moved.find((l) => l.id === "LD-1042")?.events || []).some((e) => e.text === "Перемещён в стадию «В работе»") && moved.find((l) => l.id === "LD-1042")?.lastActivity);
     check("фидбек «Стадия изменена»", (await page.locator("[data-testid=crm-feedback]").innerText()).includes("Стадия изменена"));
     await page.locator("[data-testid=crm-lead-stage-select]").selectOption("new");
-    await page.waitForFunction(() => { try { return (JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").LEADS || []).find((l) => l.id === "LD-1042")?.stageId === "new"; } catch { return false; } }, undefined, { timeout: 8000 });
+    await waitFor(async () => (await storageLeads()).find((l) => l.id === "LD-1042")?.stageId === "new");
 
     // ---------- выбор лида из журнала и связи с разделами
     await page.locator("[data-testid=crm-journal-lead-link]", { hasText: "LD-1037" }).first().click();
@@ -89,11 +93,11 @@ async function main() {
     const counts = await page.evaluate(() => [...document.querySelectorAll("[data-testid=crm-kanban-col]")].map((c) => [c.getAttribute("data-stage"), Number(c.querySelector("[data-testid=crm-kanban-col-count]")?.textContent || "0")]));
     check("канбан: 4 колонки стадий, по одному лиду (fn-sales)", counts.length === 4 && JSON.stringify(counts) === JSON.stringify([["new", 1], ["work", 1], ["qual", 1], ["deal", 1]]), JSON.stringify(counts));
     await dragCard("LD-1042", "qual");
-    await page.waitForFunction(() => { try { return (JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").LEADS || []).find((l) => l.id === "LD-1042")?.stageId === "qual"; } catch { return false; } }, undefined, { timeout: 8000 });
+    await waitFor(async () => (await storageLeads()).find((l) => l.id === "LD-1042")?.stageId === "qual");
     const afterDrag = await storageLeads();
     check("dnd: карточка переместилась в «Квалификация», событие в ленте", (afterDrag.find((l) => l.id === "LD-1042")?.events || []).some((e) => e.text === "Перемещён в стадию «Квалификация»"));
     await dragCard("LD-1042", "new");
-    await page.waitForFunction(() => { try { return (JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").LEADS || []).find((l) => l.id === "LD-1042")?.stageId === "new"; } catch { return false; } }, undefined, { timeout: 8000 });
+    await waitFor(async () => (await storageLeads()).find((l) => l.id === "LD-1042")?.stageId === "new");
     check("dnd: возврат в «Новые»", true);
     await page.locator("[data-testid=crm-kanban-card][data-lead=LD-1041]").click();
     await page.waitForSelector("[data-testid=crm-journal-card]");
@@ -135,7 +139,7 @@ async function main() {
     await page.locator("[data-testid=crm-new-lead-channel]").selectOption("email");
     await page.locator("[data-testid=crm-new-lead-note]").fill("Проверка создания лида");
     await page.locator("[data-testid=crm-new-lead-save]").click();
-    await page.waitForFunction(() => { try { return ((JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").LEADS) || []).some((l) => l.name === "ООО Ромашка"); } catch { return false; } }, undefined, { timeout: 8000 });
+    await waitFor(async () => (await storageLeads()).some((l) => l.name === "ООО Ромашка"));
     const created = (await storageLeads()).find((l) => l.name === "ООО Ромашка");
     check("лид создан: LD-1043, стадия «new», событие «Лид создан вручную», канал email", !!created && created.id === "LD-1043" && created.stageId === "new" && created.channel === "email" && (created.events || []).some((e) => e.text === "Лид создан вручную"));
     check("после создания: фидбек, журнал с новым лидом в инспекторе", (await page.locator("[data-testid=crm-feedback]").innerText()).includes("LD-1043") && (await page.locator("[data-testid=crm-inspector]").innerText()).includes("ООО Ромашка"));
@@ -150,10 +154,10 @@ async function main() {
     await page.locator("[data-testid=crm-delete-lead]").click();
     await page.waitForSelector("[data-testid=crm-delete-confirm]");
     await page.locator("[data-testid=crm-delete-confirm]").click();
-    await page.waitForFunction((n) => { try { return ((JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").LEADS) || []).length === n - 1; } catch { return false; } }, beforeDelete, { timeout: 8000 });
+    await waitFor(async () => (await storageLeads()).length === beforeDelete - 1);
     await page.waitForFunction(() => document.querySelector("[data-testid=crm-feedback]")?.textContent?.includes("Лид удалён"), undefined, { timeout: 8000 });
     await page.waitForFunction(() => document.querySelector("[data-testid=crm-inspector]")?.textContent?.includes("Демо-клиент А"), undefined, { timeout: 8000 });
-    check("после «Удалить»: лида нет в хранилище, фидбек «Лид удалён», инспектор — первый лид воронки (как в прототипе)", !(await storageLeads()).some((l) => l.id === "LD-1043") && (await page.locator("[data-testid=crm-feedback]").innerText()).includes("Лид удалён") && (await page.locator("[data-testid=crm-inspector]").innerText()).includes("Демо-клиент А"));
+    check("после «Удалить»: лида нет на сервере, фидбек «Лид удалён», инспектор — первый лид воронки (как в прототипе)", !(await storageLeads()).some((l) => l.id === "LD-1043") && (await page.locator("[data-testid=crm-feedback]").innerText()).includes("Лид удалён") && (await page.locator("[data-testid=crm-inspector]").innerText()).includes("Демо-клиент А"));
 
     // ---------- deep-link
     await open("/crm?lead=LD-1039");

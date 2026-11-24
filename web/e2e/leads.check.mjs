@@ -6,7 +6,7 @@
    (role=alert) с восстановлением, overflow, контраст, консоль.
    Запуск: npm run build && node e2e/leads.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { BASE, launch, reporter, startServer, waitReady } from "./lib/harness.mjs";
+import { apiItems, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
 import { buildXlsx } from "../tests/lib/xlsx-build.mjs";
 
 const { check, done } = reporter();
@@ -38,20 +38,22 @@ async function main() {
 
     const origin = async () => { if (!page.url().startsWith("http")) await page.goto(BASE + "/leads", { waitUntil: "networkidle" }); };
     const prepare = async (fn, arg) => { await origin(); await page.evaluate(fn, arg); };
-    const reset = () => prepare(() => localStorage.clear());
+    const reset = async () => { await apiReset(); await prepare(() => localStorage.clear()); };
     const open = async (url = "/leads") => { await page.goto(BASE + url, { waitUntil: "networkidle" }); await page.waitForSelector("[data-testid=leads-import-card]"); };
     const dropzone = page.locator("[data-testid=leads-dropzone]");
     const feedback = page.locator("[data-testid=leads-feedback]");
-    const leadsCount = async () => page.evaluate(() => { try { return (JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").LEADS || []).length; } catch { return 0; } });
+    const leadsCount = async () => (await apiItems("leads")).length;
     const upload = async (buffer, name, mime) => { await page.locator("[data-testid=leads-file-input]").setInputFiles({ name, mimeType: mime || "application/octet-stream", buffer }); };
 
     // ---------- loading: скелетоны, затем dropzone
-    await reset(); await prepare(() => localStorage.setItem("aiws-mock-latency", "1500"));
+    await reset(); await setFaults({ latencyMs: 1500 });
     await page.goto(BASE + "/leads", { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[aria-busy=true]");
     check("loading: показаны скелетоны, импорт ещё не готов", (await page.locator("[aria-busy=true]").count()) >= 1 && (await dropzone.count()) === 0);
     await page.waitForSelector("[data-testid=leads-dropzone]", { timeout: 8000 });
+    await waitFor(async () => (await page.locator("[aria-busy=true]").count()) === 0, { timeout: 10000 });
     check("loading → success: скелетоны исчезли, показан dropzone", (await page.locator("[aria-busy=true]").count()) === 0 && (await dropzone.count()) === 1);
+    await setFaults({ latencyMs: 0 });
 
     // ---------- success: dropzone с лимитами и шаблон
     await reset(); await open();
@@ -73,10 +75,10 @@ async function main() {
     await page.waitForSelector("[data-testid=leads-done]", { timeout: 8000 });
     const doneText = await page.locator("[data-testid=leads-done]").innerText();
     check("csv: «Импортировано лидов: 1», воронка «Поддержка»", /Импортировано лидов: 1/.test(doneText) && /Поддержка/.test(doneText));
-    const last = await page.evaluate(() => (JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").LEADS || []).at(-1));
+    const last = (await apiItems("leads")).at(-1);
     check("csv: лид в fn-support/ag-support, канал email, стадия new, событие «Импортирован»", last?.funnelId === "fn-support" && last?.agentId === "ag-support" && last?.channel === "email" && last?.stageId === "new" && /Импортирован/.test(last?.events?.[0]?.text ?? ""), JSON.stringify(last));
     check("csv: заметка собрана из сопоставленных колонок", last?.name === "Ольга" && last?.note === "Телефон: +7 5 · Email: o@demo.test", JSON.stringify(last?.note));
-    check("csv: данные сохранены (переживают перезагрузку)", (await leadsCount()) === before + 1);
+    check("csv: данные сохранены на сервере (переживают перезагрузку)", (await leadsCount()) === before + 1);
 
     // ---------- импорт .xlsx: автоподбор, пропуск без имени и повторов, серийные даты
     await reset(); await open();
@@ -89,7 +91,7 @@ async function main() {
     await page.waitForSelector("[data-testid=leads-done]", { timeout: 8000 });
     const done2 = await page.locator("[data-testid=leads-done]").innerText();
     check("xlsx: создано 4 из 6 строк — «без имени — 1, повторов — 1»", /Импортировано лидов: 4/.test(done2) && /без имени — 1, повторов — 1/.test(done2), done2);
-    const made = await page.evaluate(() => (JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").LEADS || []).slice(-4));
+    const made = (await apiItems("leads")).slice(-4);
     check("xlsx: воронка/агент по умолчанию (fn-sales), канал site, стадия new", made.every((l) => l.funnelId === "fn-sales" && l.agentId === "ag-sales" && l.channel === "site" && l.stageId === "new"));
     check("xlsx: заметка с серийной датой → ISO и rich text склеен", made[0]?.note === "Телефон: +7 900 000-00-01 · Email: ivan@demo.test · Последний контакт: 2025-09-01 · Хочет демо" && made[1]?.name === "Анна Смирнова", JSON.stringify(made[0]?.note));
     check("xlsx: id уникальны и последовательны", JSON.stringify(made.map((l) => l.id)) === JSON.stringify(made.map((_, i) => `LD-${1043 + i}`)), JSON.stringify(made.map((l) => l.id)));
@@ -122,7 +124,7 @@ async function main() {
     await page.locator('[data-mapcol="1"]').selectOption("skip");
     await page.locator("[data-testid=leads-do-import]").click();
     await page.waitForSelector("[data-testid=leads-done]", { timeout: 8000 });
-    const afterSkip = await page.evaluate(() => (JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").LEADS || []).at(-1));
+    const afterSkip = (await apiItems("leads")).at(-1);
     check("«не использовать»: колонка телефона не попадает в заметку", afterSkip?.name === "Ольга" && afterSkip?.note === "Email: o@demo.test", JSON.stringify(afterSkip?.note));
     await page.locator("[data-testid=leads-again]").click();
     await page.waitForSelector("[data-testid=leads-dropzone]");

@@ -1,12 +1,12 @@
 /* documents.check.mjs — браузерные проверки раздела «Документы и согласование» (этап 3, группа 5):
    шаблоны, «Что ИИ делает сам», очередь согласования (4 демо-документа, фильтры статусов),
-   одобрение/отклонение с записью в localStorage, создание документа (DOC-205, «Счёт №205»),
+   одобрение/отклонение с записью на сервере, создание документа (DOC-205, «Счёт №205»),
    «Документ» из CRM с клиентом из лида, PDF (jsPDF, файл «счёт-DOC-204.pdf»), печать (iframe),
    удаление без подтверждения (как в прототипе), overflow 375…1920 × 2 темы, контраст AA,
    внешние запросы, консоль.
    Запуск: npm run build && node e2e/docs.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { BASE, launch, reporter, startServer, waitReady } from "./lib/harness.mjs";
+import { apiItems, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
 
 const { check, done } = reporter();
 
@@ -25,19 +25,21 @@ async function main() {
 
     const origin = async () => { if (!page.url().startsWith("http")) await page.goto(BASE + "/docs", { waitUntil: "networkidle" }); };
     const prepare = async (fn, arg) => { await origin(); await page.evaluate(fn, arg); };
-    const reset = () => prepare(() => localStorage.clear());
+    const reset = async () => { await apiReset(); await prepare(() => localStorage.clear()); };
     const open = async (url = "/docs") => { await page.goto(BASE + url, { waitUntil: "networkidle" }); await page.waitForSelector("[data-testid=docs-table], main [role=alert]"); };
-    const storageDocs = () => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("aiws-db-v2") || "{}").DOCUMENTS || []; } catch { return []; } });
+    const storageDocs = () => apiItems("documents");
     const setFilter = async (f) => { await page.locator(`[data-testid=docs-filter][data-filter=${f}]`).click(); await page.waitForTimeout(100); };
     const feedback = () => page.locator("[data-testid=docs-feedback]").innerText().catch(() => "");
 
     // ---------- loading: скелетоны, затем данные
-    await reset(); await prepare(() => localStorage.setItem("aiws-mock-latency", "1500"));
+    await reset(); await setFaults({ latencyMs: 1500 });
     await page.goto(BASE + "/docs", { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[aria-busy=true]");
     check("loading: показаны скелетоны, данных ещё нет", (await page.locator("[aria-busy=true]").count()) >= 1 && (await page.locator("[data-testid=docs-table]").count()) === 0);
     await page.waitForSelector("[data-testid=docs-table]", { timeout: 8000 });
+    await waitFor(async () => (await page.locator("[aria-busy=true]").count()) === 0, { timeout: 10000 });
     check("loading → success: скелетоны исчезли, очередь заполнена", (await page.locator("[aria-busy=true]").count()) === 0 && (await page.locator("[data-testid=docs-row]").count()) === 4);
+    await setFaults({ latencyMs: 0 });
 
     // ---------- очередь: сид, статусы, типы
     await reset(); await open();
@@ -59,12 +61,12 @@ async function main() {
     check("фильтр «Одобрено»: только DOC-203", (await page.locator("[data-testid=docs-row]").count()) === 1 && (await page.locator("[data-testid=docs-row][data-doc=DOC-203]").count()) === 1);
     await setFilter("all");
 
-    // ---------- одобрение и отклонение (оптимистичные, запись в localStorage)
+    // ---------- одобрение и отклонение (оптимистичные, запись на сервере)
     await page.locator("[data-testid=docs-approve][data-doc=DOC-204]").click();
     await page.waitForTimeout(400);
     check("одобрение DOC-204: «Документ одобрен», статус «Одобрено»", (await feedback()).includes("Документ одобрен") && (await page.locator("[data-testid=docs-row][data-doc=DOC-204]").innerText()).includes("Одобрено"));
     const docs1 = await storageDocs();
-    check("одобрение записано в localStorage (DOC-204 approved, без пропусков сида)", docs1.find((d) => d.id === "DOC-204")?.status === "approved" && docs1.length === 4);
+    check("одобрение записано на сервере (DOC-204 approved, без пропусков сида)", docs1.find((d) => d.id === "DOC-204")?.status === "approved" && docs1.length === 4);
     await page.locator("[data-testid=docs-reject][data-doc=DOC-202]").click();
     await page.waitForTimeout(400);
     check("отклонение DOC-202: «Документ отклонён»", (await feedback()).includes("Документ отклонён") && (await storageDocs()).find((d) => d.id === "DOC-202")?.status === "rejected");
@@ -78,7 +80,7 @@ async function main() {
     await page.waitForTimeout(400);
     check("создание: «Документ создан», DOC-205 «Счёт №205» в очереди со статусом «На согласовании»", (await feedback()).includes("Документ создан") && (await page.locator("[data-testid=docs-row][data-doc=DOC-205]").innerText()).includes("Счёт №205") && (await page.locator("[data-testid=docs-row][data-doc=DOC-205]").innerText()).includes("На согласовании"));
     const docs2 = await storageDocs();
-    check("DOC-205 записан в localStorage (pending, клиент из лидов)", docs2.find((d) => d.id === "DOC-205")?.status === "pending" && docs2.length === 5 && /^LD-|Демо-клиент/.test(docs2.find((d) => d.id === "DOC-205")?.client || ""));
+    check("DOC-205 записан на сервере (pending, клиент из лидов)", docs2.find((d) => d.id === "DOC-205")?.status === "pending" && docs2.length === 5 && /^LD-|Демо-клиент/.test(docs2.find((d) => d.id === "DOC-205")?.client || ""));
 
     // ---------- PDF и печать
     await page.locator("[data-testid=docs-pdf][data-doc=DOC-204]").click();

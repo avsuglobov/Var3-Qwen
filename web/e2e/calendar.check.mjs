@@ -12,7 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { BASE, launch, reporter, startServer, waitReady } from "./lib/harness.mjs";
+import { apiItems, apiReset, BASE, importSnapshot, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
 
 const require = createRequire(import.meta.url);
 const { validateICS } = require("../../scripts/lib/ics_validate.js");
@@ -35,13 +35,9 @@ async function main() {
 
     const origin = async () => { if (!page.url().startsWith("http")) await page.goto(BASE + "/calendar", { waitUntil: "networkidle" }); };
     const prepare = async (fn, arg) => { await origin(); await page.evaluate(fn, arg); };
-    const reset = () => prepare(() => localStorage.clear());
+    const reset = async () => { await apiReset(); await prepare(() => localStorage.clear()); };
     const open = async (url = "/calendar") => { await page.goto(BASE + url, { waitUntil: "networkidle" }); await page.waitForSelector("[data-testid=calendar-grid], main [role=alert]"); };
-    const setEvents = (list) => prepare((v) => {
-      const db = JSON.parse(localStorage.getItem("aiws-db-v2") || "{}");
-      db.CALENDAR_EVENTS = v;
-      localStorage.setItem("aiws-db-v2", JSON.stringify(db));
-    }, list);
+    const setEvents = (list) => importSnapshot({ version: 1, CALENDAR_EVENTS: list });
     const feedback = () => page.locator("[data-testid=calendar-feedback]").innerText().catch(() => "");
     const exportFile = async () => {
       const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 5000 }), page.locator("[data-testid=calendar-export]").click()]);
@@ -52,12 +48,14 @@ async function main() {
     };
 
     // ---------- loading: скелетоны, затем данные
-    await reset(); await prepare(() => localStorage.setItem("aiws-mock-latency", "1500"));
+    await reset(); await setFaults({ latencyMs: 1500 });
     await page.goto(BASE + "/calendar", { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[aria-busy=true]");
     check("loading: показаны скелетоны, сетки ещё нет", (await page.locator("[aria-busy=true]").count()) >= 1 && (await page.locator("[data-testid=calendar-grid]").count()) === 0);
     await page.waitForSelector("[data-testid=calendar-grid]", { timeout: 8000 });
+    await waitFor(async () => (await page.locator("[aria-busy=true]").count()) === 0, { timeout: 10000 });
     check("loading → success: скелетоны исчезли, сетка и ближайшие события заполнены", (await page.locator("[aria-busy=true]").count()) === 0 && (await page.locator("[data-testid=calendar-event]").count()) === 5);
+    await setFaults({ latencyMs: 0 });
 
     // ---------- шапка и сетка текущего месяца
     await reset(); await open();
@@ -92,7 +90,7 @@ async function main() {
 
     // ---------- экспорт .ics: строгий валидатор
     await reset(); await open();
-    const fixtures = await page.evaluate(() => JSON.parse(localStorage.getItem("aiws-db-v2")).CALENDAR_EVENTS.map((e) => ({ id: e.id, title: e.title })));
+    const fixtures = (await apiItems("calendar-events")).map((e) => ({ id: e.id, title: e.title }));
     const f1 = await exportFile();
     check("имя файла ai-workspace-calendar.ics", f1.name === "ai-workspace-calendar.ics", f1.name);
     check("кодировка UTF-8 без BOM", !(f1.bytes[0] === 0xEF && f1.bytes[1] === 0xBB));
@@ -103,16 +101,12 @@ async function main() {
     check("срок EV-2 без DTEND (точка во времени), EV-1 с DTEND 10:45", f1.text.includes("UID:EV-2@aiworkspace") && /UID:EV-1@aiworkspace[\s\S]*?DTEND:20261116T104500/.test(f1.text));
 
     // ---------- битые события пропускаются, файл остаётся валидным
-    await prepare((v) => {
-      const db = JSON.parse(localStorage.getItem("aiws-db-v2"));
-      db.CALENDAR_EVENTS = db.CALENDAR_EVENTS.concat(v);
-      localStorage.setItem("aiws-db-v2", JSON.stringify(db));
-    }, [
+    await setEvents((await apiItems("calendar-events")).concat([
       { id: "BAD-1", title: "Пустая дата", date: "", time: "10:00", duration: "30 мин", type: "call", assignee: "М" },
       { id: "BAD-2", title: "30 февраля", date: "2026-02-30", time: "10:00", type: "call" },
       { id: "OK-3", title: "Ч:ММ без нуля", date: "2026-11-22", time: "9:05", duration: "2 ч", type: "meeting", assignee: "Группа" }
-    ]);
-    await open(); // React Query уже держит сид в памяти — перезагружаем, чтобы адаптер перечитал localStorage
+    ]));
+    await open(); // перезагружаем страницу, чтобы запросить обновлённые данные с сервера
     const f2 = await exportFile();
     const errs2 = validateICS(f2.text, { expectedCount: fixtures.length + 1 });
     check("битые события пропущены, файл валиден" + (errs2.length ? " [" + errs2.slice(0, 3).join("; ") + "]" : ""), errs2.length === 0);
