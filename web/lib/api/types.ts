@@ -1,4 +1,4 @@
-import type { ActivityPoint, ChainTemplate, Channel, CollectionName, CompanyProfile, Funnel, ItemOf, KnowledgeSource, Lead, QuizQuestion, Stage, SupplyOffer, SupplyRequest } from "@/lib/schemas";
+import type { ActivityPoint, ChainTemplate, Channel, CollectionName, CompanyProfile, Funnel, Integration, ItemOf, KnowledgeSource, Lead, QuizQuestion, Stage, SupplyOffer, SupplyRequest } from "@/lib/schemas";
 
 export type ApiErrorCode = "validation" | "not_found" | "duplicate" | "unavailable" | "invalid_import";
 
@@ -69,6 +69,7 @@ export interface Api {
     chainTemplates(): Promise<ChainTemplate[]>;
     supplyRequests(): Promise<SupplyRequest[]>;
     supplyOffers(): Promise<SupplyOffer[]>;
+    integrations(): Promise<Integration[]>;
   };
   data: {
     /** Снимок в формате прототипа (`version: 1` + коллекции): файлы обмениваются между версиями. */

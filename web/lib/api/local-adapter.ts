@@ -1,4 +1,4 @@
-import { ACTIVITY, CHAIN_TEMPLATES, CHANNELS, FUNNELS, KNOWLEDGE_SOURCES, QUIZZES, QUIZ_PASS, STAGES, SUPPLY_OFFERS, SUPPLY_REQUESTS } from "@/lib/mock-data/reference";
+import { ACTIVITY, CHAIN_TEMPLATES, CHANNELS, FUNNELS, INTEGRATIONS, KNOWLEDGE_SOURCES, QUIZZES, QUIZ_PASS, STAGES, SUPPLY_OFFERS, SUPPLY_REQUESTS } from "@/lib/mock-data/reference";
 import { SEED_DATA } from "@/lib/mock-data/seed";
 import { certificateSchema, COLLECTION_NAMES, COLLECTION_SCHEMAS, companyProfileSchema, parseCollection, type Certificate, type CollectionName, type CompanyProfile, type DbSnapshot, type ItemOf } from "@/lib/schemas";
 import { ApiError, type Api, type ImportResult, type Repository, type StorageLike } from "@/lib/api/types";
@@ -180,7 +180,8 @@ export function createLocalApi(options: LocalApiOptions = {}): Api {
       async knowledgeSources() { await guard(); return clone(KNOWLEDGE_SOURCES); },
       async chainTemplates() { await guard(); return clone(CHAIN_TEMPLATES); },
       async supplyRequests() { await guard(); return clone(SUPPLY_REQUESTS); },
-      async supplyOffers() { await guard(); return clone(SUPPLY_OFFERS); }
+      async supplyOffers() { await guard(); return clone(SUPPLY_OFFERS); },
+      async integrations() { await guard(); return clone(INTEGRATIONS); }
     },
     data: {
       async exportJSON() { await guard(); return JSON.stringify({ version: SNAPSHOT_VERSION, ...load() }, null, 2); },
