@@ -7,7 +7,7 @@ import { ChatThread } from "@/components/dialogs/chat-thread";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/state";
-import { useAgents, useChannels, useConversations } from "@/lib/api/hooks";
+import { useAgents, useChannels, useConversations, useLeads } from "@/lib/api/hooks";
 import type { Conversation } from "@/lib/schemas";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +20,7 @@ export function ConversationsView() {
   const conversations = useConversations();
   const channels = useChannels();
   const agents = useAgents();
+  const leads = useLeads();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pane, setPane] = useState<"list" | "thread">("list");
 
@@ -98,7 +99,15 @@ export function ConversationsView() {
           agentName={agentName}
           onBack={() => setPane("list")}
         />
-        <ChatContextCard className="hidden lg:flex" conv={selected} channels={channels.data ?? []} />
+        <ChatContextCard
+          className="hidden lg:flex"
+          conv={selected}
+          channels={channels.data ?? []}
+          leadHref={(() => {
+            const lead = (leads.data ?? []).find((l) => l.name === selected.contactName);
+            return lead ? `/crm?lead=${lead.id}` : undefined;
+          })()}
+        />
       </div>
     </div>
   );

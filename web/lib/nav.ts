@@ -40,7 +40,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { id: "overview", label: "Обзор", description: "Сводка по работе AI-сотрудников и текущая активность", icon: LayoutDashboard, stage: 2 },
       { id: "agents", label: "AI-сотрудники", description: "Команда AI-сотрудников, мастер создания и тест-чат", icon: Bot, stage: 3 },
       { id: "dialogs", label: "Диалоги", description: "Единый inbox: переписка, режим «Человек + ИИ», контекст клиента", icon: MessagesSquare, stage: 3 },
-      { id: "crm", label: "CRM", description: "Воронки сделок и работа с лидами: журнал, канбан, таблица", icon: Columns3, stage: 5 }
+      { id: "crm", label: "CRM", description: "Воронки сделок и работа с лидами: журнал, канбан, таблица", icon: Columns3, stage: 3 }
     ]
   },
   {

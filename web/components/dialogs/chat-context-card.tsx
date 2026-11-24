@@ -9,9 +9,11 @@ import type { Channel, Conversation } from "@/lib/schemas";
 import { cn } from "@/lib/utils";
 
 /** Панель контекста диалога (как в прототипе): кто обратился, канал, история, данные клиента, следующий шаг. */
-export function ChatContextCard({ conv, channels, className }: {
+export function ChatContextCard({ conv, channels, leadHref, className }: {
   conv: Conversation;
   channels: readonly Channel[];
+  /** Ссылка на лида в CRM (этап 3, группа 3): /crm?lead=…, если у контакта есть лид. */
+  leadHref?: string;
   className?: string;
 }) {
   const channel = channels.find((ch) => ch.id === conv.channel);
@@ -46,12 +48,12 @@ export function ChatContextCard({ conv, channels, className }: {
         <h3 className="section-label">Следующий шаг</h3>
         <p className="mt-1.5 text-[13px]">{ctx.nextStep}</p>
         <Button asChild variant="secondary" size="sm" className="mt-2 w-full">
-          <Link href="/crm" data-testid="chat-open-crm">
+          <Link href={leadHref ?? "/crm"} data-testid="chat-open-crm">
             <ArrowRight aria-hidden />
             Открыть в CRM
           </Link>
         </Button>
-        <p className="mt-2 text-[11px] text-muted-foreground">Связь с лидом появится вместе с разделом «CRM»</p>
+        <p className="mt-2 text-[11px] text-muted-foreground">{leadHref ? "Откроется инспектор связанного лида в CRM" : "Для этого контакта нет лида в CRM"}</p>
       </section>
     </div>
   );
