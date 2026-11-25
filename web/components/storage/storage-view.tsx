@@ -8,9 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/state";
-import { useCompanyProfile, useKnowledgeSources, useSaveCompanyProfile } from "@/lib/api/hooks";
+import { MaterialTestDialog } from "@/components/storage/material-test-dialog";
+import { useCompanyProfile, useCourses, useKnowledgeSources, useSaveCompanyProfile } from "@/lib/api/hooks";
 import { SOURCE_TYPE_LABEL, sourceStatusTone, sourceTypeOf, type SourceType } from "@/lib/selectors/storage";
 import { cn } from "@/lib/utils";
+import type { Course } from "@/lib/schemas";
 
 const SOURCE_ICON: Record<SourceType, typeof FileText> = {
   pdf: FileText,
@@ -23,18 +25,21 @@ const SOURCE_ICON: Record<SourceType, typeof FileText> = {
 /**
  * Раздел «Хранилище и база знаний» (этап 3, группа 7) — поведение storage() прототипа:
  * описание компании (редактируется и сохраняется), переключатель «Искать в интернете»,
- * таблица источников знаний с типами и статусами. Кнопки прототипа с пометкой «скоро»
- * («Добавить источник», «Настроить») не переносятся — в приложении только доступные действия.
+ * таблица источников знаний с типами и статусами. Этап 7 добавил «Сделать тест» —
+ * генерацию теста курса из тезисов материала источника (material-test-dialog).
  */
 export function StorageView() {
   const profileQ = useCompanyProfile();
   const sourcesQ = useKnowledgeSources();
+  const coursesQ = useCourses();
   const save = useSaveCompanyProfile();
   const [webSearch, setWebSearch] = useState(true);
   const [name, setName] = useState("");
   const [about, setAbout] = useState("");
   const [audience, setAudience] = useState("");
   const [feedback, setFeedback] = useState<{ text: string; kind: "status" | "alert" }>({ text: "", kind: "status" });
+  /** Источник, для которого открыт «Сделать тест» (этап 7). */
+  const [testSource, setTestSource] = useState<{ id: string; name: string } | null>(null);
 
   const onFeedback = (text: string, kind: "status" | "alert" = "status"): void => setFeedback({ text, kind });
 
@@ -47,8 +52,8 @@ export function StorageView() {
     }
   }, [profileQ.data, name, about, audience]);
 
-  const loading = profileQ.isPending || sourcesQ.isPending;
-  const error = profileQ.isError ? profileQ.error : sourcesQ.isError ? sourcesQ.error : null;
+  const loading = profileQ.isPending || sourcesQ.isPending || coursesQ.isPending;
+  const error = profileQ.isError ? profileQ.error : sourcesQ.isError ? sourcesQ.error : coursesQ.isError ? coursesQ.error : null;
 
   const saveProfile = (): void => {
     save.mutate(
@@ -75,7 +80,7 @@ export function StorageView() {
     return (
       <div className="min-w-0 space-y-6">
         <Header />
-        <ErrorState message={error.message} onRetry={() => { void profileQ.refetch(); void sourcesQ.refetch(); }} />
+        <ErrorState message={error.message} onRetry={() => { void profileQ.refetch(); void sourcesQ.refetch(); void coursesQ.refetch(); }} />
       </div>
     );
   }
@@ -130,12 +135,13 @@ export function StorageView() {
         <Card>
           <CardContent>
             <div className="min-w-0 overflow-x-auto">
-              <table className="w-full min-w-[520px] text-left text-sm" data-testid="storage-table">
+              <table className="w-full min-w-[620px] text-left text-sm" data-testid="storage-table">
                 <thead>
                   <tr className="border-b border-border text-[11px] uppercase tracking-wide text-muted-foreground">
                     <th className="py-2 pr-3 font-medium">Источник</th>
                     <th className="py-2 pr-3 font-medium">Тип</th>
-                    <th className="py-2 font-medium">Статус</th>
+                    <th className="py-2 pr-3 font-medium">Статус</th>
+                    <th className="py-2 text-right font-medium">Тест</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -152,11 +158,23 @@ export function StorageView() {
                           </span>
                         </td>
                         <td className="py-2.5 pr-3 font-data text-xs uppercase text-muted-foreground">{SOURCE_TYPE_LABEL[st]}</td>
-                        <td className="py-2.5">
+                        <td className="py-2.5 pr-3">
                           <Badge variant="outline" className="text-[11px]">
                             {tone === "status" ? <span className="size-1.5 rounded-full bg-status" aria-hidden /> : null}
                             {s.status}
                           </Badge>
+                        </td>
+                        <td className="py-2.5 text-right">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            aria-label={`Сделать тест из «${s.name}»`}
+                            data-testid="storage-quiz-btn"
+                            data-source={s.id}
+                            onClick={() => setTestSource({ id: s.id, name: s.name })}
+                          >
+                            Сделать тест
+                          </Button>
                         </td>
                       </tr>
                     );
@@ -167,6 +185,15 @@ export function StorageView() {
           </CardContent>
         </Card>
       </section>
+
+      <MaterialTestDialog
+        key={testSource?.id ?? "closed"}
+        open={testSource !== null}
+        onOpenChange={(next) => { if (!next) setTestSource(null); }}
+        source={testSource}
+        courses={coursesQ.data ?? []}
+        onCreated={(course: Course) => setFeedback({ text: `Тест создан: ${course.title}`, kind: "status" })}
+      />
     </div>
   );
 }

@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/state";
-import { useAgents, useChannels, useConversations, useCreateLead, useDeleteLead, useDocuments, useFunnels, useIntegrations, useLeads, useMoveLeadStage, useStages } from "@/lib/api/hooks";
+import { useAgents, useChannels, useCompanyProfile, useConversations, useCreateLead, useDeleteLead, useDocuments, useFunnels, useIntegrations, useLeads, useMoveLeadStage, useStages } from "@/lib/api/hooks";
 import type { Lead } from "@/lib/schemas";
 import {
   VIEW_META,
@@ -29,6 +29,7 @@ import {
   type CrmView,
   type TableSort
 } from "@/lib/selectors/crm";
+import { applyConnectionStates } from "@/lib/selectors/system";
 import { cn } from "@/lib/utils";
 
 /**
@@ -45,6 +46,7 @@ export function CrmView() {
   const conversationsQ = useConversations();
   const documentsQ = useDocuments();
   const integrationsQ = useIntegrations();
+  const profileQ = useCompanyProfile();
   const moveStage = useMoveLeadStage();
   const createLead = useCreateLead();
   const removeLead = useDeleteLead();
@@ -71,9 +73,9 @@ export function CrmView() {
     if (leadParam) setSelectedLeadId(leadParam);
   }, []);
 
-  const loading = leadsQ.isPending || funnelsQ.isPending || stagesQ.isPending || channelsQ.isPending || agentsQ.isPending || integrationsQ.isPending;
-  const error = leadsQ.isError || funnelsQ.isError || stagesQ.isError || channelsQ.isError || agentsQ.isError || integrationsQ.isError
-    ? leadsQ.error ?? funnelsQ.error ?? stagesQ.error ?? channelsQ.error ?? agentsQ.error ?? integrationsQ.error
+  const loading = leadsQ.isPending || funnelsQ.isPending || stagesQ.isPending || channelsQ.isPending || agentsQ.isPending || integrationsQ.isPending || profileQ.isPending;
+  const error = leadsQ.isError || funnelsQ.isError || stagesQ.isError || channelsQ.isError || agentsQ.isError || integrationsQ.isError || profileQ.isError
+    ? leadsQ.error ?? funnelsQ.error ?? stagesQ.error ?? channelsQ.error ?? agentsQ.error ?? integrationsQ.error ?? profileQ.error
     : null;
   const leads = leadsQ.data ?? [];
   const funnels = funnelsQ.data ?? [];
@@ -107,7 +109,7 @@ export function CrmView() {
         <Header view={view} funnelId={activeFunnelId} funnels={funnels} syncLabel={null} syncOk={false} onFunnelChange={() => undefined} onViewChange={() => undefined} onCreate={() => undefined} />
         <ErrorState
           message={error.message}
-          onRetry={() => { void leadsQ.refetch(); void funnelsQ.refetch(); void stagesQ.refetch(); void channelsQ.refetch(); void agentsQ.refetch(); void integrationsQ.refetch(); }}
+          onRetry={() => { void leadsQ.refetch(); void funnelsQ.refetch(); void stagesQ.refetch(); void channelsQ.refetch(); void agentsQ.refetch(); void integrationsQ.refetch(); void profileQ.refetch(); }}
         />
       </div>
     );
@@ -119,8 +121,8 @@ export function CrmView() {
         view={view}
         funnelId={activeFunnelId}
         funnels={funnels}
-        syncLabel={crmSyncLabel(crmSyncRows(integrationsQ.data ?? []))}
-        syncOk={crmSyncOk(crmSyncRows(integrationsQ.data ?? []))}
+        syncLabel={crmSyncLabel(crmSyncRows(applyConnectionStates(integrationsQ.data ?? [], profileQ.data?.connections)))}
+        syncOk={crmSyncOk(crmSyncRows(applyConnectionStates(integrationsQ.data ?? [], profileQ.data?.connections)))}
         onFunnelChange={(id) => setFunnelId(id)}
         onViewChange={setView}
         onCreate={() => setCreateOpen(true)}

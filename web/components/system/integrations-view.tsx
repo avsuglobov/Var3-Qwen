@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/state";
-import { useIntegrations } from "@/lib/api/hooks";
-import { integrationStatusText } from "@/lib/selectors/system";
+import { useCompanyProfile, useIntegrations, useSaveCompanyProfile } from "@/lib/api/hooks";
+import { applyConnectionStates, integrationStatusText } from "@/lib/selectors/system";
 import { cn } from "@/lib/utils";
 import type { Integration } from "@/lib/schemas";
 
@@ -25,15 +25,17 @@ const INTEGRATION_ICON: Record<string, typeof FileText> = {
 /**
  * Раздел «Интеграции» (этап 3, финальная группа) — поведение integrations() прототипа:
  * сетка карточек D.INTEGRATIONS со статусом «Подключено / Не подключено» и кнопка
- * «Запросить интеграцию» (обратная связь вместо тоста прототипа). Кнопки карточек
- * «Настроить»/«Подключить» в прототипе помечены «скоро» (data-soon) и не переносятся —
- * в приложении только доступные действия.
+ * «Запросить интеграцию» (обратная связь вместо тоста прототипа). Этап 7: «Подключить»/
+ * «Отключить» сохраняют состояние в профиле компании (connections) и переживают
+ * перезагрузку; вызовы внешних сервисов в демо не выполняются — помечено честно.
  */
 export function IntegrationsView() {
   const integrationsQ = useIntegrations();
+  const profileQ = useCompanyProfile();
+  const save = useSaveCompanyProfile();
   const [feedback, setFeedback] = useState("");
 
-  if (integrationsQ.isPending) {
+  if (integrationsQ.isPending || profileQ.isPending) {
     return (
       <div className="min-w-0 space-y-6" aria-busy="true" aria-label="Загрузка интеграций">
         <Header />
@@ -46,16 +48,30 @@ export function IntegrationsView() {
       </div>
     );
   }
-  if (integrationsQ.isError) {
+  if (integrationsQ.isError || profileQ.isError) {
+    const err = integrationsQ.isError ? integrationsQ.error : profileQ.isError ? profileQ.error : null;
     return (
       <div className="min-w-0 space-y-6">
         <Header />
-        <ErrorState message={integrationsQ.error.message} onRetry={() => void integrationsQ.refetch()} />
+        <ErrorState message={err?.message ?? "Ошибка загрузки"} onRetry={() => { void integrationsQ.refetch(); void profileQ.refetch(); }} />
       </div>
     );
   }
 
   const items = integrationsQ.data ?? [];
+  const effective = applyConnectionStates(items, profileQ.data?.connections);
+
+  /** Переключение состояния: в профиль сохраняются явные состояния всех интеграций справочника. */
+  const toggle = (id: string, next: boolean): void => {
+    const connections = effective.map((it) => ({ id: it.id, connected: it.id === id ? next : it.connected }));
+    save.mutate(
+      { connections },
+      {
+        onSuccess: () => setFeedback(`${nameOf(items, id)}: состояние сохранено`),
+        onError: (e) => setFeedback(e.message)
+      }
+    );
+  };
 
   return (
     <div className="min-w-0 space-y-6">
@@ -68,15 +84,24 @@ export function IntegrationsView() {
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="integrations-grid">
-        {items.map((it) => (
-          <IntegrationCard key={it.id} item={it} />
+        {effective.map((it) => (
+          <IntegrationCard key={it.id} item={it} onToggle={toggle} />
         ))}
       </div>
+
+      <p className="inline-flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+        <Plug className="size-3.5" aria-hidden />
+        Состояние подключения сохраняется в данных приложения; обмен данными с внешними сервисами в демо не выполняется.
+      </p>
     </div>
   );
 }
 
-function IntegrationCard({ item }: { item: Integration }) {
+function nameOf(items: readonly Integration[], id: string): string {
+  return items.find((it) => it.id === id)?.name ?? id;
+}
+
+function IntegrationCard({ item, onToggle }: { item: Integration; onToggle: (id: string, next: boolean) => void }) {
   const Icon = INTEGRATION_ICON[item.icon] ?? Plug;
   const connected = item.connected;
   return (
@@ -96,6 +121,16 @@ function IntegrationCard({ item }: { item: Integration }) {
             <span className={cn("size-1.5 rounded-full", connected ? "bg-status" : "bg-muted-foreground")} aria-hidden />
             {integrationStatusText(connected)}
           </Badge>
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-label={connected ? `Отключить ${item.name}` : `Подключить ${item.name}`}
+            data-testid="integrations-toggle"
+            data-int={item.id}
+            onClick={() => onToggle(item.id, !connected)}
+          >
+            {connected ? "Отключить" : "Подключить"}
+          </Button>
         </div>
       </CardContent>
     </Card>

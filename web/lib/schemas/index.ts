@@ -147,7 +147,9 @@ export const courseSchema = z.object({
   /** Тест курса: у демо-курсов вопросы в справочнике QUIZZES, у созданных — в записи. */
   questions: z.array(quizQuestionSchema).nullish(),
   /** false — курс создан пользователем; у демо-сида поле не задано, записи демонстрационные. */
-  demo: z.boolean().nullish()
+  demo: z.boolean().nullish(),
+  /** Источник знаний, из материала которого собран тест (этап 7); у остальных курсов поле не задано. */
+  sourceId: optText
 });
 
 export const certificateSchema = z.object({
@@ -169,7 +171,18 @@ export const supplyOfferSchema = z.object({ supplier: text(300), price: z.number
 /** Интеграция раздела «Интеграции» (data.js INTEGRATIONS): справочник карточек со статусом подключения. */
 export const integrationSchema = z.object({ id, name: text(100), desc: text(300), connected: z.boolean(), icon: text(60) });
 
-export const companyProfileSchema = z.object({ name: text(300), about: text(2000), audience: text(2000) });
+/** Сохранённое состояние подключения интеграции (этап 7): id из справочника INTEGRATIONS. */
+export const connectionStateSchema = z.object({ id, connected: z.boolean() });
+
+export const companyProfileSchema = z.object({
+  name: text(300),
+  about: text(2000),
+  audience: text(2000),
+  /** Выбранный тариф (этап 7); названия без цен — биллинг внешний, в демо не подключён. */
+  tariff: optText,
+  /** Состояния подключений интеграций (этап 7); у записей без состояния — статус справочника. */
+  connections: z.array(connectionStateSchema).nullish()
+});
 
 export type KnowledgeSource = z.infer<typeof knowledgeSourceSchema>;
 export type ChainNode = z.infer<typeof chainNodeSchema>;

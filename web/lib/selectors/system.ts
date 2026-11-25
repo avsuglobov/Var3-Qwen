@@ -1,3 +1,5 @@
+import type { Integration } from "@/lib/schemas";
+
 /**
  * Чистые функции и константы финальной группы этапа 3 — «Интеграции, Настройки, Помощь»:
  * данные захардкожены в разделах прототипа (sections2.js integrations()/settings()/help()),
@@ -9,6 +11,20 @@
 /** Текст статус-бейджа карточки (status-badge on/off прототипа). */
 export function integrationStatusText(connected: boolean): string {
   return connected ? "Подключено" : "Не подключено";
+}
+
+/**
+ * Наложение сохранённых состояний подключений на справочник (этап 7): у интеграции
+ * с сохранённым состоянием — оно, у остальных — статус справочника; неизвестные id
+ * игнорируются, вход не мутируется.
+ */
+export function applyConnectionStates(
+  reference: readonly Integration[],
+  saved: readonly { id: string; connected: boolean }[] | null | undefined
+): Integration[] {
+  if (!saved || saved.length === 0) return [...reference];
+  const map = new Map(saved.map((c) => [c.id, c.connected]));
+  return reference.map((it) => (map.has(it.id) ? { ...it, connected: map.get(it.id) === true } : it));
 }
 
 /* ----------------------------------------------------------- Настройки */
@@ -65,6 +81,14 @@ export const SETTINGS_DEFAULTS = {
   companySite: "demo.site",
   companyAbout: "Демо-описание."
 } as const;
+
+/* ----------------------------------------------------------- Тариф (этап 7) */
+
+/** Доступные тарифы: названия без цен — цены не выдумываются (биллинг — внешний сервис). */
+export const TARIFFS: readonly string[] = ["Демо", "Базовый", "Профи"];
+
+/** Тариф по умолчанию: демо (пробный период). */
+export const DEFAULT_TARIFF = "Демо";
 
 /** Сообщение после импорта файла данных — текст тоста importJSON прототипа (db.js). */
 export function importFeedback(dropped: number): string {

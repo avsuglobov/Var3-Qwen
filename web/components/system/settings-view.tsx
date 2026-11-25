@@ -5,28 +5,31 @@ import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { useChannels, useExportData, useImportData, useResetData } from "@/lib/api/hooks";
+import { useChannels, useCompanyProfile, useExportData, useImportData, useResetData, useSaveCompanyProfile } from "@/lib/api/hooks";
 import {
   DEFAULT_SETTINGS_TAB,
+  DEFAULT_TARIFF,
   NOTIFICATION_TOGGLES,
   ROLE_ACCESS,
   SETTINGS_DEFAULTS,
   SETTINGS_TABS,
+  TARIFFS,
   importFeedback
 } from "@/lib/selectors/system";
 import { cn } from "@/lib/utils";
+import type { CompanyProfile } from "@/lib/schemas";
 
 /**
  * Раздел «Настройки» (этап 3, финальная группа) — поведение settings() прототипа:
  * 7 вкладок (состояние клиента, как AIWS.store.settingsTab), роли и каналы, переключатели
  * «Уведомлений» (в сессии, как AIWS.store.switches), вкладка «Данные» с работающими
- * экспортом/импортом/сбросом через слой Api. Кнопки прототипа с пометкой «скоро»
- * (Сохранить/Выбрать тариф, data-soon) не переносятся — в приложении только доступные
- * действия; поля профиля и компании — демо-значения без сохранения (как fieldRow прототипа).
+ * экспортом/импортом/сбросом через слой Api. Этап 7: смена тарифа сохраняется в профиле
+ * компании; поля профиля и компании — демо-значения без сохранения (как fieldRow прототипа).
  */
 export function SettingsView() {
   const [tab, setTab] = useState(DEFAULT_SETTINGS_TAB);
   const channelsQ = useChannels();
+  const profileQ = useCompanyProfile();
 
   return (
     <div className="min-w-0 space-y-6">
@@ -51,7 +54,7 @@ export function SettingsView() {
       </div>
 
       <Card className="max-w-[640px]">
-        <CardContent>{tab === "profile" ? <ProfileTab /> : tab === "company" ? <CompanyTab /> : tab === "roles" ? <RolesTab /> : tab === "channels" ? <ChannelsTab channelsQ={channelsQ} /> : tab === "notifications" ? <NotificationsTab /> : tab === "tariff" ? <TariffTab /> : <DataTab />}</CardContent>
+        <CardContent>{tab === "profile" ? <ProfileTab /> : tab === "company" ? <CompanyTab /> : tab === "roles" ? <RolesTab /> : tab === "channels" ? <ChannelsTab channelsQ={channelsQ} /> : tab === "notifications" ? <NotificationsTab /> : tab === "tariff" ? <TariffTab profileQ={profileQ} /> : <DataTab />}</CardContent>
       </Card>
     </div>
   );
@@ -181,20 +184,76 @@ function NotificationsTab() {
 
 /* -------------------------------------------------------------- Тариф */
 
-function TariffTab() {
+/**
+ * Вкладка «Тариф» (этап 7): выбор тарифа и сохранение в профиле компании
+ * (companyProfile.update). Названия без цен; биллинг — внешний сервис, в демо не подключён.
+ */
+function TariffTab({ profileQ }: { profileQ: { data?: CompanyProfile; isPending: boolean; isError: boolean; error: Error | null } }) {
+  const save = useSaveCompanyProfile();
+  const [picked, setPicked] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ text: string; kind: "status" | "alert" }>({ text: "", kind: "status" });
+
+  if (profileQ.isPending) {
+    return (
+      <p className="text-[13px] text-muted-foreground" aria-busy="true">
+        Загрузка тарифа…
+      </p>
+    );
+  }
+  if (profileQ.isError) {
+    return (
+      <p role="alert" className="text-[13px] text-destructive">
+        {profileQ.error?.message ?? "Не удалось загрузить профиль"}
+      </p>
+    );
+  }
+
+  const current = picked ?? profileQ.data?.tariff ?? DEFAULT_TARIFF;
+  const changed = current !== (profileQ.data?.tariff ?? DEFAULT_TARIFF);
+
+  const submit = (): void =>
+    save.mutate(
+      { tariff: current },
+      {
+        onSuccess: () => setFeedback({ text: `Тариф сохранён: ${current}`, kind: "status" }),
+        onError: (e) => setFeedback({ text: e.message, kind: "alert" })
+      }
+    );
+
   return (
     <div className="space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold" data-testid="settings-tariff-name">
-            Тариф: Демо
-          </div>
-          <div className="mt-0.5 text-[12.5px] text-muted-foreground">Пробный период · дн.</div>
-        </div>
+      <div className="text-sm font-semibold" data-testid="settings-tariff-name">
+        Тариф: {current}
       </div>
+      <div className="space-y-1.5">
+        <label htmlFor="settings-tariff-select" className="text-[13px] font-medium text-muted-foreground">
+          Выбранный тариф
+        </label>
+        <select
+          id="settings-tariff-select"
+          value={current}
+          onChange={(e) => { setPicked(e.target.value); setFeedback({ text: "", kind: "status" }); }}
+          className="h-9 w-full rounded-sm border border-input bg-card px-2.5 text-sm focus-visible:outline-2 focus-visible:outline-ring"
+          data-testid="settings-tariff-select"
+        >
+          {TARIFFS.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </div>
+      <Button onClick={submit} disabled={save.isPending || !changed} data-testid="settings-tariff-save">
+        Сохранить тариф
+      </Button>
+      {feedback.text ? (
+        <p role={feedback.kind} aria-live="polite" className="text-[13px]" data-testid="settings-tariff-feedback">
+          {feedback.text}
+        </p>
+      ) : null}
       <p className="inline-flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
         <Clock className="size-3.5" aria-hidden />
-        Цены не показываются (демо). Подключение тарифа — на реальном бэкенде.
+        Цены не показываются (демо). Смена тарифа сохраняется в данных приложения; биллинг — внешний сервис, в демо не подключён.
       </p>
     </div>
   );
