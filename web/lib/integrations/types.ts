@@ -28,6 +28,18 @@ export interface IntegrationRunOutcome {
 export const integrationAction = z.enum(["check", "sync"]);
 export type IntegrationAction = z.infer<typeof integrationAction>;
 
+/** Сущность «лид», полученная от внешнего сервиса до маппинга в снимок (этап 9). */
+export const externalLeadSchema = z.object({
+  /** Идентификатор записи у внешнего сервиса (числовые id amoCRM/Bitrix24 приводятся к строке). */
+  externalId: z.string().min(1).max(100),
+  name: z.string().min(1).max(300),
+  value: z.number().min(0).max(1_000_000_000).nullable()
+});
+export type ExternalLead = z.infer<typeof externalLeadSchema>;
+
+/** Результат синхронизации: итог связи плюс — если адаптер переносит данные — полученные лиды. */
+export type SyncResult = IntegrationRunOutcome & { leads?: ExternalLead[] };
+
 /** Запись журнала интеграций (.data/integration-runs.json, вне снимка данных). */
 export const integrationRunSchema = z.object({
   id: z.string().max(40),
@@ -61,7 +73,8 @@ export interface IntegrationAdapter {
   readonly id: string;
   readonly fields: readonly IntegrationFieldDef[];
   check(creds: Record<string, string>, fetchImpl?: typeof fetch): Promise<IntegrationRunOutcome>;
-  sync(creds: Record<string, string>, fetchImpl?: typeof fetch): Promise<IntegrationRunOutcome>;
+  /** Синхронизация: доступность сервиса, а с этапа 9 — и выборка лидов (leads, если адаптер переносит данные). */
+  sync(creds: Record<string, string>, fetchImpl?: typeof fetch): Promise<SyncResult>;
 }
 
 /** Итог «до сети»: некорректная конфигурация адаптера (нет ключей, битый формат адреса). */

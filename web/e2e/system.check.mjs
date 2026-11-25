@@ -5,6 +5,9 @@
    «Ключи» (диалог с маскированием секретов), «Проверить связь» и «Синхронизировать» с
    реальными HTTP-вызовами через сервер (webhook-адаптер указывает на собственные маршруты
    /api/debug и /api/nowhere — сеть не трогается), журнал прогонов в .data, 400 без ключей.
+   Этап 9: синхронизация переносит данные — демо-источник int-demo (без сети, без карточки):
+   3 лида с детерминированным id ext-demo-… попадают в снимок и канбан CRM, повторный
+   синк идемпотентен (новых 0, обновлено 3), в интерфейсе адаптера нет.
    Настройки: 7 вкладок, демо-значения
    полей, роли, каналы (первые 3 акцентные), переключатели уведомлений (мышь и пробел), тариф:
    выбор и сохранение в профиле с перезагрузкой (этап 7), вкладка «Данные»: экспорт файла
@@ -135,6 +138,20 @@ async function main() {
     check("/api/health: {ok:true}", health.ok === true);
     await open("/integrations");
     check("после перезагрузки: последний прогон на месте (журнал серверный)", (await page.locator("[data-testid=integrations-run]").count()) === 1 && /Проверка · ошибка/.test(await page.locator("[data-testid=integrations-run]").innerText()));
+
+    // ---------- этап 9: синхронизация переносит данные — демо-источник int-demo (без сети)
+    const sync1 = await fetch(BASE + "/api/integrations/sync", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ integrationId: "int-demo" }) }).then((r) => r.json());
+    check("этап 9: sync int-demo — «Демо-источник вернул 3 лида; импортировано 3 (новых 3, обновлено 0)»", sync1.run?.ok === true && /импортировано 3 \(новых 3, обновлено 0\)/.test(sync1.run?.detail ?? ""));
+    const leadsNow = await fetch(BASE + "/api/collections/leads").then((r) => r.json());
+    const demo1 = leadsNow.find((l) => l.id === "ext-demo-1");
+    check("этап 9: лиды в снимке с детерминированным id ext-demo-1…3, стадия «new», воронка «fn-sales», событие импорта", leadsNow.filter((l) => /^ext-demo-/.test(l.id)).length === 3 && demo1?.stageId === "new" && demo1?.funnelId === "fn-sales" && demo1?.events?.[0]?.text === "Лид импортирован (Демо-источник)");
+    await page.goto(BASE + "/crm?view=kanban", { waitUntil: "networkidle" });
+    await page.waitForSelector("[data-testid=crm-kanban-card]", { timeout: 8000 });
+    check("этап 9: импортированные лиды видны в канбане CRM", (await page.locator("main").innerText()).includes("Импорт: сделка Г"));
+    const sync2 = await fetch(BASE + "/api/integrations/sync", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ integrationId: "int-demo" }) }).then((r) => r.json());
+    check("этап 9: повторный sync идемпотентен — «импортировано 3 (новых 0, обновлено 3)»", sync2.run?.ok === true && /импортировано 3 \(новых 0, обновлено 3\)/.test(sync2.run?.detail ?? ""));
+    await open("/integrations");
+    check("этап 9: демо-источник не появляется в интерфейсе (кнопок адаптера по-прежнему 3)", (await page.locator("[data-testid=integrations-check]").count()) === 3);
 
     // ================= Настройки
     await open("/settings");
