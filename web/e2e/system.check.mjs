@@ -1,7 +1,11 @@
 /* system.check.mjs — браузерные проверки финальной группы «Интеграции, Настройки, Помощь»
    (этап 3). Интеграции: 8 карточек со статусами «Подключено/Не подключено», «Подключить»/
    «Отключить» с сохранением в профиле и после перезагрузки + бейдж CRM «нет связи» (этап 7),
-   «Запросить интеграцию» с обратной связью. Настройки: 7 вкладок, демо-значения
+   «Запросить интеграцию» с обратной связью. Этап 8: адаптеры внешних сервисов — кнопки
+   «Ключи» (диалог с маскированием секретов), «Проверить связь» и «Синхронизировать» с
+   реальными HTTP-вызовами через сервер (webhook-адаптер указывает на собственные маршруты
+   /api/debug и /api/nowhere — сеть не трогается), журнал прогонов в .data, 400 без ключей.
+   Настройки: 7 вкладок, демо-значения
    полей, роли, каналы (первые 3 акцентные), переключатели уведомлений (мышь и пробел), тариф:
    выбор и сохранение в профиле с перезагрузкой (этап 7), вкладка «Данные»: экспорт файла
    (валидный JSON версии 1), импорт с обратной связью, битый файл → ошибка, сброс к демо.
@@ -74,6 +78,63 @@ async function main() {
     check("перезагрузка: amoCRM отключена, WhatsApp подключена", (await page.locator("[data-testid=integrations-card][data-int=int-amocrm]").innerText()).includes("Не подключено") && (await page.locator("[data-testid=integrations-card][data-int=int-wa]").innerText()).includes("Подключено"));
     await open("/crm");
     check("CRM: бейдж синхронизации показывает «amoCRM: нет связи» (связка с этапом 6)", /Синхр\..*amoCRM: нет связи/.test(await page.locator("[data-testid=crm-sync]").innerText()));
+
+    // ---------- этап 8: адаптеры внешних сервисов, ключи на сервере, реальные вызовы
+    // сеть не трогается: webhook-адаптер указывает на собственные маршруты приложения
+    fs.rmSync(".data/secrets.json", { force: true });
+    fs.rmSync(".data/integration-runs.json", { force: true });
+    await open("/integrations");
+    check("этап 8: у трёх карточек кнопки адаптера (Ключи/Проверить/Синхронизировать), у пяти — «Адаптер появится позже»", (await page.locator("[data-testid=integrations-check]").count()) === 3 && (await page.locator("[data-testid=integrations-sync]").count()) === 3 && (await page.locator("[data-testid=integrations-keys]").count()) === 3 && (await page.locator("[data-testid=integrations-card]:has-text('Адаптер появится позже')").count()) === 5);
+    check("toggle-кнопки «Подключить/Отключить» не потерялись (8)", (await page.locator("[data-testid=integrations-toggle]").count()) === 8);
+    await page.locator("[data-testid=integrations-keys][data-int=int-api]").click();
+    await page.waitForSelector("[data-testid=integrations-keys-dialog]");
+    check("диалог ключей: «Ключи — REST API», предупреждение о secrets.json", (await page.locator("[data-testid=integrations-keys-dialog]").innerText()).includes("Ключи — REST API") && (await page.locator("[data-testid=integrations-keys-dialog]").innerText()).includes("secrets.json"));
+    await page.locator("[data-testid=integrations-key-input][data-field=url]").fill(BASE + "/api/debug");
+    await page.locator("[data-testid=integrations-keys-save]").click();
+    await page.waitForSelector("[data-testid=integrations-keys-saved]", { timeout: 8000 });
+    check("ключи сохранены: подтверждение в диалоге", true);
+    const cred = await fetch(BASE + "/api/integrations/credentials?integrationId=int-api").then((r) => r.json());
+    check("GET ключей: несекретное поле отдаётся целиком", cred.fields.find((f) => f.key === "url").plain === BASE + "/api/debug");
+    await page.locator("[data-testid=integrations-keys-cancel]").click();
+    await page.waitForFunction(() => !document.querySelector("[data-testid=integrations-keys-dialog]"), { timeout: 4000 });
+    await page.locator("[data-testid=integrations-check][data-int=int-api]").click();
+    await page.waitForSelector("[data-testid=integrations-run][data-int=int-api]:has-text('успех')", { timeout: 15000 });
+    const runOkText = await page.locator("[data-testid=integrations-run][data-int=int-api]").innerText();
+    check("проверка связи (webhook GET /api/debug): «Проверка · успех» и HTTP 200", runOkText.includes("Проверка") && runOkText.includes("успех") && runOkText.includes("HTTP 200"));
+    const runs = await fetch(BASE + "/api/integrations/runs").then((r) => r.json());
+    check("журнал на сервере: первая запись check/int-api/ok:true", runs.runs[0]?.integrationId === "int-api" && runs.runs[0]?.action === "check" && runs.runs[0]?.ok === true);
+    await page.locator("[data-testid=integrations-sync][data-int=int-api]").click();
+    await page.waitForFunction(() => { const el = document.querySelector("[data-testid=integrations-run][data-int=int-api]"); return el && el.textContent?.includes("Синхронизация"); }, { timeout: 15000 });
+    check("синхронизация (webhook POST): «Синхронизация · успех»", /Синхронизация · успех/.test(await page.locator("[data-testid=integrations-run][data-int=int-api]").innerText()));
+    await page.locator("[data-testid=integrations-keys][data-int=int-amocrm]").click();
+    await page.waitForSelector("[data-testid=integrations-keys-dialog]");
+    await page.locator("[data-testid=integrations-key-input][data-field=subdomain]").fill("demo-company");
+    await page.locator("[data-testid=integrations-key-input][data-field=accessToken]").fill("amo-token-1234567890");
+    await page.locator("[data-testid=integrations-keys-save]").click();
+    await page.waitForSelector("[data-testid=integrations-keys-saved]", { timeout: 8000 });
+    const credAmo = await fetch(BASE + "/api/integrations/credentials?integrationId=int-amocrm").then((r) => r.json());
+    check("секрет отдаётся только маской «••••7890», полного токена в ответе нет", credAmo.fields.find((f) => f.key === "accessToken").masked === "••••7890" && !JSON.stringify(credAmo).includes("amo-token-1234567890"));
+    check("в браузере полного токена нет: поле пустое, маска рядом с полем", (await page.locator("[data-testid=integrations-key-input][data-field=accessToken]").inputValue()) === "" && (await page.locator("[data-testid=integrations-keys-dialog]").innerText()).includes("••••7890") && !(await page.locator("body").innerText()).includes("amo-token-1234567890"));
+    await page.locator("[data-testid=integrations-keys-cancel]").click();
+    await page.waitForFunction(() => !document.querySelector("[data-testid=integrations-keys-dialog]"), { timeout: 4000 });
+    await page.locator("[data-testid=integrations-keys][data-int=int-api]").click();
+    await page.waitForSelector("[data-testid=integrations-keys-dialog]");
+    await page.locator("[data-testid=integrations-key-input][data-field=url]").fill(BASE + "/api/nowhere");
+    await page.locator("[data-testid=integrations-keys-save]").click();
+    await page.waitForSelector("[data-testid=integrations-keys-saved]", { timeout: 8000 });
+    await page.locator("[data-testid=integrations-keys-cancel]").click();
+    await page.waitForFunction(() => !document.querySelector("[data-testid=integrations-keys-dialog]"), { timeout: 4000 });
+    await page.locator("[data-testid=integrations-check][data-int=int-api]").click();
+    await page.waitForSelector("[data-testid=integrations-run][data-int=int-api]:has-text('ошибка')", { timeout: 15000 });
+    const runFailText = await page.locator("[data-testid=integrations-run][data-int=int-api]").innerText();
+    check("отказ связи: «Проверка · ошибка», HTTP 404 в тексте, приложение не падает", runFailText.includes("Проверка") && runFailText.includes("ошибка") && runFailText.includes("HTTP 404"));
+    check("обратная связь: «проверка связи — ошибка»", /проверка связи — ошибка/.test(await page.locator("[data-testid=integrations-feedback]").innerText()));
+    const missing = await fetch(BASE + "/api/integrations/check", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ integrationId: "int-bitrix" }) });
+    check("без ключей — 400 «Не заполнены ключи» (прямой вызов)", missing.status === 400 && JSON.stringify(await missing.json()).includes("Не заполнены ключи"));
+    const health = await fetch(BASE + "/api/health").then((r) => r.json());
+    check("/api/health: {ok:true}", health.ok === true);
+    await open("/integrations");
+    check("после перезагрузки: последний прогон на месте (журнал серверный)", (await page.locator("[data-testid=integrations-run]").count()) === 1 && /Проверка · ошибка/.test(await page.locator("[data-testid=integrations-run]").innerText()));
 
     // ================= Настройки
     await open("/settings");
