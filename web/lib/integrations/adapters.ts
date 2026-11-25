@@ -1,14 +1,19 @@
-import { configError, netError, type IntegrationAdapter, type IntegrationRunOutcome } from "./types";
+import { amocrmLead, bitrixLead } from "./import-map";
+import { configError, netError, type ExternalLead, type IntegrationAdapter, type IntegrationRunOutcome } from "./types";
 
 /**
- * Адаптеры внешних сервисов (этап 8): реальные HTTP-запросы выполняются только на сервере.
+ * Адаптеры внешних сервисов (этапы 8–9): реальные HTTP-запросы выполняются только на сервере.
  * Набор полей конфигурации задаёт адаптер — значения вводятся вручную в диалоге «Ключи» и
  * хранятся в .data/secrets.json. Секреты не попадают в тексты результатов: ошибки возвращают
- * только HTTP-статус и короткое пояснение. В e2e сеть не трогается — реальный обмен покрывают
- * unit-тесты с подставленным fetch, а e2e использует webhook-адаптер с адресом самого приложения.
+ * только HTTP-статус и короткое пояснение. Этап 9: sync приносит не только доступность, но и
+ * выборку лидов (до 25 записей) — их маппинг и запись в снимок делает маршрут синхронизации.
+ * В e2e сеть не трогается: реальный обмен покрывают unit-тесты с подставленным fetch,
+ * e2e использует webhook-адаптер с адресом самого приложения и демо-источник int-demo.
  */
 
 const TIMEOUT_MS = 10_000;
+/** Сколько записей запрашивает синхронизация за один прогон (первая страница, новые сверху). */
+const SYNC_PAGE = 25;
 
 /** Базовый вызов: единая обработка статусов, таймаута и сетевых ошибок. */
 async function call(url: string, init: RequestInit, fetchImpl: typeof fetch): Promise<IntegrationRunOutcome> {
@@ -64,14 +69,17 @@ export const amocrmAdapter: IntegrationAdapter = {
     if (!AMOCRM_SUBDOMAIN_RE.test(subdomain)) return configError("Не задан корректный поддомен amoCRM (буквы, цифры и дефис)");
     if (!token) return configError("Не задан токен доступа amoCRM");
     try {
-      const res = await fetchImpl(`https://${subdomain}.amocrm.ru/api/v4/leads?limit=1`, {
+      const res = await fetchImpl(`https://${subdomain}.amocrm.ru/api/v4/leads?limit=${SYNC_PAGE}`, {
         headers: { authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(TIMEOUT_MS)
       });
       if (!res.ok) return { ok: false, detail: `amoCRM ответил HTTP ${res.status} при запросе сделок`, status: res.status };
       const body = (await res.json().catch(() => null)) as { _embedded?: { leads?: unknown[] } } | null;
-      const count = body?._embedded?.leads?.length ?? 0;
-      return { ok: true, detail: `Список сделок получен (в выборке ${count})`, status: res.status };
+      const leads = (body?._embedded?.leads ?? []).flatMap((raw) => {
+        const lead = amocrmLead(raw);
+        return lead ? [lead] : [];
+      });
+      return { ok: true, detail: `Получено сделок: ${leads.length}`, status: res.status, leads };
     } catch (e) {
       return netError(e);
     }
@@ -119,13 +127,16 @@ export const bitrix24Adapter: IntegrationAdapter = {
       const res = await fetchImpl(`${base}crm.lead.list.json`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ order: { ID: "DESC" }, limit: 1 }),
+        body: JSON.stringify({ order: { ID: "DESC" }, limit: SYNC_PAGE }),
         signal: AbortSignal.timeout(TIMEOUT_MS)
       });
       if (!res.ok) return { ok: false, detail: `Bitrix24 ответил HTTP ${res.status} при запросе лидов`, status: res.status };
       const body = (await res.json().catch(() => null)) as { result?: unknown[] } | null;
-      const count = Array.isArray(body?.result) ? body.result.length : 0;
-      return { ok: true, detail: `Список лидов получен (в выборке ${count})`, status: res.status };
+      const leads = (Array.isArray(body?.result) ? body.result : []).flatMap((raw) => {
+        const lead = bitrixLead(raw);
+        return lead ? [lead] : [];
+      });
+      return { ok: true, detail: `Получено лидов: ${leads.length}`, status: res.status, leads };
     } catch (e) {
       return netError(e);
     }
@@ -159,8 +170,33 @@ export const webhookAdapter: IntegrationAdapter = {
   }
 };
 
-/** Реестр адаптеров; у остальных карточек справочника адаптера пока нет («Адаптер появится позже»). */
-export const INTEGRATION_ADAPTERS: readonly IntegrationAdapter[] = [amocrmAdapter, bitrix24Adapter, webhookAdapter];
+/**
+ * Демо-источник (int-demo): встроенный адаптер без сети — три стабильных лида-фикстуры.
+ * Нужен для проверки цикла «синхронизация → снимок» в e2e и при развёртывании без ключей;
+ * в справочнике карточек его нет, поэтому в интерфейсе он не появляется.
+ */
+export const demoAdapter: IntegrationAdapter = {
+  id: "int-demo",
+  fields: [],
+  async check() {
+    return { ok: true, detail: "Демо-источник доступен (без сети)", status: 200 };
+  },
+  async sync() {
+    const leads: ExternalLead[] = [
+      { externalId: "1", name: "Импорт: сделка Г", value: 150_000 },
+      { externalId: "2", name: "Импорт: сделка Д", value: null },
+      { externalId: "3", name: "Импорт: сделка Е", value: 42_000 }
+    ];
+    return { ok: true, detail: `Демо-источник вернул ${leads.length} лида`, status: 200, leads };
+  }
+};
+
+/**
+ * Реестр адаптеров. Карточки справочника INTEGRATIONS с адаптером: int-amocrm, int-bitrix,
+ * int-api («Адаптер появится позже» — у остальных). int-demo в справочнике отсутствует:
+ * маршрут /api/integrations/sync принимает его, интерфейс — нет.
+ */
+export const INTEGRATION_ADAPTERS: readonly IntegrationAdapter[] = [amocrmAdapter, bitrix24Adapter, webhookAdapter, demoAdapter];
 
 const ADAPTER_BY_ID = new Map(INTEGRATION_ADAPTERS.map((a) => [a.id, a] as const));
 

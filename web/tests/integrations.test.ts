@@ -2,12 +2,16 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { amocrmAdapter, adapterOf, bitrix24Adapter, INTEGRATION_ADAPTERS, webhookAdapter } from "@/lib/integrations/adapters";
+import { amocrmAdapter, adapterOf, bitrix24Adapter, demoAdapter, INTEGRATION_ADAPTERS, webhookAdapter } from "@/lib/integrations/adapters";
+import { amocrmLead, bitrixLead, externalLeadId, importExternalLeads } from "@/lib/integrations/import-map";
 import { maskSecret, readCredentials, saveCredentials } from "@/lib/server/secrets";
 import { appendRun, readRuns } from "@/lib/server/runs";
+import { createLocalApi, createMemoryStorage } from "@/lib/api";
+import type { Lead } from "@/lib/schemas";
 
-/* Этап 8 — слой внешних интеграций: адаптеры с подставленным fetch (сеть не нужна),
-   маскирование секретов, хранилище ключей и журнал прогонов во временном .data. */
+/* Этапы 8–9 — слой внешних интеграций: адаптеры с подставленным fetch (сеть не нужна),
+   маскирование секретов, хранилище ключей и журнал прогонов во временном .data;
+   этап 9 — маппинг внешних лидов и импорт в снимок с апсертом по внешнему id. */
 
 const fetchJson = (body: unknown, status = 200): typeof fetch =>
   (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
@@ -31,10 +35,11 @@ afterEach(() => {
   delete process.env.AIWS_DATA_DIR;
 });
 
-describe("реестр адаптеров (этап 8)", () => {
-  it("адаптеры у трёх карточек справочника: amoCRM, Bitrix24, REST API", () => {
-    expect(INTEGRATION_ADAPTERS.map((a) => a.id)).toEqual(["int-amocrm", "int-bitrix", "int-api"]);
+describe("реестр адаптеров (этапы 8–9)", () => {
+  it("четыре адаптера: amoCRM, Bitrix24, REST API и демо-источник int-demo (без карточки)", () => {
+    expect(INTEGRATION_ADAPTERS.map((a) => a.id)).toEqual(["int-amocrm", "int-bitrix", "int-api", "int-demo"]);
     expect(adapterOf("int-amocrm")).not.toBeNull();
+    expect(adapterOf("int-demo")).not.toBeNull();
     expect(adapterOf("int-tg")).toBeNull();
   });
   it("у адаптеров объявлены поля конфигурации, секретные помечены", () => {
@@ -74,10 +79,14 @@ describe("amoCRM-адаптер — реальные статусы HTTP без 
     expect(called).toBe(0);
     expect(outcome.status).toBeNull();
   });
-  it("синхронизация: список сделок получен, в выборке 1", async () => {
-    const outcome = await amocrmAdapter.sync({ subdomain: "company", accessToken: "amo-token" }, fetchJson({ _embedded: { leads: [{ id: 1 }] } }));
+  it("синхронизация: до 25 сделок, маппинг в ExternalLead (этап 9)", async () => {
+    const outcome = await amocrmAdapter.sync({ subdomain: "company", accessToken: "amo-token" }, fetchJson({ _embedded: { leads: [{ id: 7, name: "Сделка Ж", price: 125_500 }, { id: 8, name: "Без суммы", price: null }] } }));
     expect(outcome.ok).toBe(true);
-    expect(outcome.detail).toBe("Список сделок получен (в выборке 1)");
+    expect(outcome.detail).toBe("Получено сделок: 2");
+    expect(outcome.leads).toEqual([
+      { externalId: "7", name: "Сделка Ж", value: 125_500 },
+      { externalId: "8", name: "Без суммы", value: null }
+    ]);
   });
   it("сеть недоступна: ошибка без HTTP-статуса", async () => {
     const outcome = await amocrmAdapter.check({ subdomain: "company", accessToken: "amo-token" }, await rejectsFetch());
@@ -106,17 +115,21 @@ describe("Bitrix24-адаптер — вебхук и методы REST", () => 
     expect((await bitrix24Adapter.check({ webhookUrl: "http://insecure/" }, fetchImpl)).ok).toBe(false);
     expect((await bitrix24Adapter.check({}, fetchImpl)).detail).toContain("вебхука");
   });
-  it("синхронизация: crm.lead.list.json с телом запроса, счётчик выборки", async () => {
+  it("синхронизация: crm.lead.list.json с телом запроса, маппинг выборки (этап 9)", async () => {
     const seen: string[] = [];
     const fetchImpl = (async (url: RequestInfo, init?: RequestInit) => {
       seen.push(String(url), String(init?.body));
-      return new Response(JSON.stringify({ result: [{ ID: 1 }, { ID: 2 }] }), { status: 200 });
+      return new Response(JSON.stringify({ result: [{ ID: "11", TITLE: "Заявка К", OPPORTUNITY: "1500,50" }, { ID: 12, TITLE: "Без суммы" }] }), { status: 200 });
     }) as unknown as typeof fetch;
     const outcome = await bitrix24Adapter.sync({ webhookUrl: "https://b24-x.bitrix24.ru/rest/1/secretkey/" }, fetchImpl);
     expect(outcome.ok).toBe(true);
     expect(seen[0]).toBe("https://b24-x.bitrix24.ru/rest/1/secretkey/crm.lead.list.json");
-    expect(JSON.parse(seen[1])).toEqual({ order: { ID: "DESC" }, limit: 1 });
-    expect(outcome.detail).toContain("в выборке 2");
+    expect(JSON.parse(seen[1])).toEqual({ order: { ID: "DESC" }, limit: 25 });
+    expect(outcome.detail).toBe("Получено лидов: 2");
+    expect(outcome.leads).toEqual([
+      { externalId: "11", name: "Заявка К", value: 1500.5 },
+      { externalId: "12", name: "Без суммы", value: null }
+    ]);
   });
 });
 
@@ -174,6 +187,59 @@ describe("маскирование и хранилище ключей (.data/sec
   it("несуществующий файл — пустой набор (нет сбоев при первом запуске)", () => {
     rmSync(path.join(dataDir, "secrets.json"), { force: true });
     expect(readCredentials().credentials).toEqual({});
+  });
+});
+
+describe("маппинг внешних лидов (этап 9)", () => {
+  it("amoCRM: {id, name, price} → ExternalLead; битые записи → null; нечисловая цена → null", () => {
+    expect(amocrmLead({ id: 5, name: "Сделка", price: 1000 })).toEqual({ externalId: "5", name: "Сделка", value: 1000 });
+    expect(amocrmLead({ id: 6, name: "Без суммы" })).toEqual({ externalId: "6", name: "Без суммы", value: null });
+    expect(amocrmLead({ id: 7, name: "Строковая цена", price: "500" })).toEqual({ externalId: "7", name: "Строковая цена", value: null });
+    expect(amocrmLead({ id: 8 })).toBeNull();
+    expect(amocrmLead(null)).toBeNull();
+  });
+  it("Bitrix24: {ID, TITLE, OPPORTUNITY}; строка «1500,50» → число; битые → null", () => {
+    expect(bitrixLead({ ID: "9", TITLE: "Заявка", OPPORTUNITY: "1500,50" })).toEqual({ externalId: "9", name: "Заявка", value: 1500.5 });
+    expect(bitrixLead({ ID: 10, TITLE: "Число", OPPORTUNITY: 250 })).toEqual({ externalId: "10", name: "Число", value: 250 });
+    expect(bitrixLead({ ID: "11" })).toBeNull();
+  });
+  it("детерминированный id: ext-amo-12, мусорные символы вырезаются, длина ограничена", () => {
+    expect(externalLeadId("amo", "12")).toBe("ext-amo-12");
+    expect(externalLeadId("demo", "demo#1/x")).toBe("ext-demo-demo1x");
+    expect(externalLeadId("amo", "x".repeat(60)).length).toBeLessThanOrEqual(40);
+  });
+});
+
+describe("импорт лидов в снимок (этап 9): апсерт по внешнему id", () => {
+  const config = { funnelId: "fn-sales", stageId: "new", agentId: "ag-sales", sourceLabel: "amoCRM", now: new Date(2026, 10, 25, 14, 7).getTime() };
+  const leads = [
+    { externalId: "21", name: "Сделка Л", value: 90_000 },
+    { externalId: "22", name: "Сделка М", value: null }
+  ];
+  it("первый прогон создаёт лиды в первой воронке/стадии, у события подпись источника", async () => {
+    const api = createLocalApi({ storage: createMemoryStorage() });
+    const res = await importExternalLeads(api.leads, "amo", leads, config);
+    expect(res).toEqual({ created: 2, updated: 0 });
+    const lead = await api.leads.get("ext-amo-21");
+    expect(lead).toMatchObject({ name: "Сделка Л", channel: "site", stageId: "new", funnelId: "fn-sales", agentId: "ag-sales", value: 90_000 });
+    expect(lead?.events[0]?.text).toBe("Лид импортирован (amoCRM)");
+    expect(lead?.note).toContain("amoCRM · запись 21");
+  });
+  it("повторный прогон обновляет (новых 0), стадия, изменённая пользователем, не затирается", async () => {
+    const api = createLocalApi({ storage: createMemoryStorage() });
+    await importExternalLeads(api.leads, "amo", leads, config);
+    await api.leads.update("ext-amo-21", { stageId: "deal" }); // пользователь перенёс лид по канбану
+    const res = await importExternalLeads(api.leads, "amo", [{ externalId: "21", name: "Сделка Л (обновлена)", value: 95_000 }], config);
+    expect(res).toEqual({ created: 0, updated: 1 });
+    const lead = await api.leads.get("ext-amo-21");
+    expect(lead).toMatchObject({ stageId: "deal", name: "Сделка Л (обновлена)", value: 95_000 });
+    expect(await api.leads.get("ext-amo-22")).toBeDefined();
+  });
+  it("демо-адаптер int-demo: стабильные фикстуры без сети, check доступен", async () => {
+    const outcome = await demoAdapter.sync({});
+    expect(outcome.ok).toBe(true);
+    expect(outcome.leads?.map((l) => l.externalId)).toEqual(["1", "2", "3"]);
+    expect((await demoAdapter.check({})).ok).toBe(true);
   });
 });
 
