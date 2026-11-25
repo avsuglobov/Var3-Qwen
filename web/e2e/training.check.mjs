@@ -6,7 +6,10 @@
    ответами + «Попробовать снова», граница 80% (4 из 5) — «Тест пройден», сертификат (cert-2,
    имя/курс/дата), курс становится «Завершён», фон обновляется, PDF скачивается (имя файла,
    %PDF), итоги сохраняются в localStorage и после перезагрузки; граница на 4 вопросах
-   (3/4 = 75% → пройдено). Overflow 375…1920 × 2 темы, контраст AA, внешние запросы, консоль.
+   (3/4 = 75% → пройдено). Создание курса (этап 6): модалка «Создать курс» — название, уроки
+   (добавление/удаление), тест с 4 вариантами и верным ответом, валидация формы, карточка без
+   «Демо» (demo:false), прохождение теста и сертификат, сохранение на сервере и после
+   перезагрузки. Overflow 375…1920 × 2 темы, контраст AA, внешние запросы, консоль.
    Запуск: npm run build && node e2e/training.check.mjs */
 import fs from "node:fs";
 import os from "node:os";
@@ -120,6 +123,53 @@ async function main() {
     await page.waitForSelector("[data-testid=quiz-result]");
     check("граница 75% (3 из 4) — пройдено: «Тест пройден: 3 из 4 (75%)»", (await page.locator("[data-testid=quiz-dialog]").innerText()).includes("Тест пройден: 3 из 4 (75%)"));
     await page.locator("[data-testid=quiz-close]").click();
+
+    // ---------- создание курса (этап 6)
+    await reset(); await open();
+    check("шапка: есть «Создать курс»", (await page.locator("[data-testid=training-new-btn]").count()) === 1);
+    await page.locator("[data-testid=training-new-btn]").click();
+    await page.waitForSelector("[data-testid=course-dialog]");
+    await page.locator("[data-testid=course-save]").click();
+    check("создание: пустая форма → «Введите название курса» (role=alert)", (await page.locator("[data-testid=course-error]").innerText()).includes("Введите название курса"));
+    await page.locator("[data-testid=course-title]").fill("Онбординг менеджеров");
+    await page.locator("[data-testid=course-lesson-input]").fill("Знакомство с продуктом");
+    await page.locator("[data-testid=course-lesson-add]").click();
+    await page.locator("[data-testid=course-lesson-input]").nth(1).fill("Работа с базой знаний");
+    await page.locator("[data-testid=course-lesson-add]").click();
+    check("уроки: три строки, «Убрать» удаляет", (await page.locator("[data-testid=course-lesson-input]").count()) === 3);
+    await page.locator("[data-testid=course-lesson-remove]").nth(2).click();
+    check("уроки: после удаления две строки", (await page.locator("[data-testid=course-lesson-input]").count()) === 2);
+    await page.locator("[data-testid=course-question-add]").click();
+    await page.waitForSelector("[data-testid=course-question]");
+    await page.locator("[data-testid=course-q]").fill("Где посмотреть инструкцию AI-сотрудника?");
+    await page.locator("[data-testid=course-save]").click();
+    check("вопрос: варианты не заполнены → ошибка формы (role=alert)", (await page.locator("[data-testid=course-error]").innerText()).includes("варианта ответа"));
+    const newOpts = ["В карточке сотрудника", "В чате", "Нигде", "В календаре"];
+    for (let i = 0; i < 4; i++) await page.locator("[data-testid=course-option]").nth(i).fill(newOpts[i]);
+    await page.locator("[data-testid=course-answer]").nth(0).check();
+    await page.locator("[data-testid=course-save]").click();
+    await page.waitForSelector("[data-testid=course-dialog]", { state: "detached", timeout: 8000 });
+    await page.waitForSelector("[data-testid=training-quiz-btn][data-course=cr-1]", { timeout: 8000 });
+    const coursesText = await page.locator("[data-testid=training-courses]").innerText();
+    check("карточка создана: 4 курса, «2 уроков · Не начат · тест: 1 вопр.», без бейджа «Демо»", (await page.locator("[data-testid=training-course-title]").count()) === 4 && coursesText.includes("2 уроков · Не начат · тест: 1 вопр.") && (await page.locator("[data-testid=training-demo-badge]").count()) === 3);
+    const created = (await apiItems("courses")).find((c) => c.id === "cr-1");
+    check("сервер: cr-1 с уроками, вопросом теста и demo:false", created?.demo === false && created?.lessonTitles?.length === 2 && created?.questions?.length === 1);
+    await page.locator("[data-testid=training-quiz-btn][data-course=cr-1]").click();
+    await page.waitForSelector("[data-testid=quiz-intro]");
+    check("тест созданного курса: «Вопросов: 1 · проходной балл: 70%»", /Вопросов: 1 · проходной балл: 70%/.test(await page.locator("[data-testid=quiz-dialog]").innerText()));
+    await page.locator("[data-testid=quiz-name]").fill("Анна");
+    await page.locator("[data-testid=quiz-start]").click();
+    await page.waitForSelector("[data-testid=quiz-question]");
+    await page.locator('[data-testid=quiz-option][value="0"]').check();
+    await page.locator("[data-testid=quiz-next]").click();
+    await page.waitForSelector("[data-testid=quiz-result]");
+    check("тест созданного курса пройден: «Тест пройден: 1 из 1 (100%)»", (await page.locator("[data-testid=quiz-dialog]").innerText()).includes("Тест пройден: 1 из 1 (100%)"));
+    await page.locator("[data-testid=quiz-close]").click();
+    await page.waitForSelector("[data-testid=training-cert-btn][data-course=cr-1]", { timeout: 5000 });
+    check("фон обновился: у созданного курса «Сертификат», в списке два сертификата", (await page.locator("[data-testid=training-cert]").count()) === 2);
+    await open();
+    const after = (await apiItems("courses")).find((c) => c.id === "cr-1");
+    check("перезагрузка: созданный курс «Завершён» сохранён на сервере", after?.progress === 1 && after?.status === "Завершён");
 
     // ---------- overflow и контраст
     await reset();

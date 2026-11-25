@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { QUIZ_PASS, QUIZZES } from "@/lib/mock-data/reference";
-import { courseAction, pctOf, quizResultTitle, quizScore } from "@/lib/selectors/training";
+import { buildCourse, courseAction, nextCourseId, pctOf, quizResultTitle, quizScore } from "@/lib/selectors/training";
+import type { Course } from "@/lib/schemas";
 
 /* Селекторы «Обучения» — инварианты теста прототипа (scripts/regress_learn.js):
    у каждого курса есть вопросы (4 варианта, верный в диапазоне), порог 70%,
@@ -66,5 +67,49 @@ describe("обучение: подсчёт результата теста", () 
     const r = quizScore(qs, [-1, -1, -1, -1, -1]);
     expect(r.ok).toBe(0);
     expect(r.passed).toBe(false);
+  });
+});
+
+describe("создание курсов (этап 6)", () => {
+  const courses: Course[] = [
+    { id: "crs-1", title: "Демо", lessons: 3, progress: 0, status: "Не начат" },
+    { id: "cr-1", title: "Мой курс", lessons: 2, progress: 0, status: "Не начат" },
+    { id: "cr-7", title: "Ещё курс", lessons: 1, progress: 0, status: "Не начат" }
+  ];
+  it("nextCourseId: считает только созданные cr-N; сид crs-N не мешает", () => {
+    expect(nextCourseId(courses)).toBe("cr-8");
+    expect(nextCourseId([])).toBe("cr-1");
+  });
+  it("buildCourse: пустое название и уроки без названий отклоняются", () => {
+    expect(buildCourse({ title: "  ", lessonTitles: ["Урок"], questions: [] }, courses)).toEqual({ error: "Введите название курса" });
+    expect(buildCourse({ title: "Курс", lessonTitles: ["  ", ""], questions: [] }, courses)).toEqual({ error: "Добавьте хотя бы один урок" });
+  });
+  it("buildCourse: битый вопрос теста отклоняется (схема quizQuestionSchema)", () => {
+    const bad = [{ q: "Вопрос?", options: ["Только один вариант"], answer: 0 }];
+    expect(buildCourse({ title: "Курс", lessonTitles: ["Урок 1"], questions: bad }, courses)).toEqual({ error: expect.stringContaining("вопросе теста") });
+  });
+  it("buildCourse: cr-8, прогресс 0, «Не начат», demo:false, названия уроков и тест сохраняются", () => {
+    const q = { q: "Где посмотреть инструкцию?", options: ["В карточке сотрудника", "В чате", "Нигде", "В календаре"], answer: 0 };
+    const c = buildCourse({ title: " Мой курс ", lessonTitles: ["Урок 1", " Урок 2 ", ""], questions: [q] }, courses);
+    expect("error" in c).toBe(false);
+    if ("error" in c) return;
+    expect(c.id).toBe("cr-8");
+    expect(c.title).toBe("Мой курс");
+    expect(c.lessons).toBe(2);
+    expect(c.progress).toBe(0);
+    expect(c.status).toBe("Не начат");
+    expect(c.lessonTitles).toEqual(["Урок 1", "Урок 2"]);
+    expect(c.questions).toEqual([q]);
+    expect(c.demo).toBe(false);
+  });
+  it("buildCourse: курс без теста не содержит поле questions", () => {
+    const c = buildCourse({ title: "Курс", lessonTitles: ["Урок"], questions: [] }, courses);
+    expect("error" in c).toBe(false);
+    if ("error" in c) return;
+    expect(c.questions).toBeUndefined();
+    expect(c.demo).toBe(false);
+  });
+  it("курс пользователя с тестом доступен для «Пройти тест» (courseAction)", () => {
+    expect(courseAction(0, true)).toBe("quiz");
   });
 });

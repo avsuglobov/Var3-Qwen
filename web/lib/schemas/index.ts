@@ -133,8 +133,21 @@ export const agentSchema = z.object({
   approvals: z.array(approvalRuleSchema)
 });
 
+/** Вопрос теста курса: 2–6 вариантов, один верный (порог — QUIZ_PASS); у демо-курсов и у созданных пользователем (этап 6). */
+export const quizQuestionSchema = z.object({
+  q: text(500),
+  options: z.array(text(300)).min(2).max(6),
+  answer: z.number().int().min(0).max(5)
+});
+
 export const courseSchema = z.object({
-  id, title: text(300), lessons: z.number().int().min(0).max(200), progress: z.number().min(0).max(1), status: text(60)
+  id, title: text(300), lessons: z.number().int().min(0).max(200), progress: z.number().min(0).max(1), status: text(60),
+  /** Названия уроков созданного пользователем курса; у демо-сида задано только число уроков. */
+  lessonTitles: z.array(text(300)).nullish(),
+  /** Тест курса: у демо-курсов вопросы в справочнике QUIZZES, у созданных — в записи. */
+  questions: z.array(quizQuestionSchema).nullish(),
+  /** false — курс создан пользователем; у демо-сида поле не задано, записи демонстрационные. */
+  demo: z.boolean().nullish()
 });
 
 export const certificateSchema = z.object({
@@ -157,13 +170,6 @@ export const supplyOfferSchema = z.object({ supplier: text(300), price: z.number
 export const integrationSchema = z.object({ id, name: text(100), desc: text(300), connected: z.boolean(), icon: text(60) });
 
 export const companyProfileSchema = z.object({ name: text(300), about: text(2000), audience: text(2000) });
-
-/** Вопрос демо-теста курса: 2–6 вариантов, один верный (порог — QUIZ_PASS). */
-export const quizQuestionSchema = z.object({
-  q: text(500),
-  options: z.array(text(300)).min(2).max(6),
-  answer: z.number().int().min(0).max(5)
-});
 
 export type KnowledgeSource = z.infer<typeof knowledgeSourceSchema>;
 export type ChainNode = z.infer<typeof chainNodeSchema>;
