@@ -5,16 +5,19 @@ import { importExternalLeads } from "@/lib/integrations/import-map";
 import type { IntegrationAction, IntegrationRun, IntegrationRunOutcome, SyncResult } from "@/lib/integrations/types";
 import { INTEGRATIONS } from "@/lib/mock-data/reference";
 import { appendRun } from "@/lib/server/runs";
-import { credentialsOf } from "@/lib/server/secrets";
+import { credentialsOf, saveCredentials } from "@/lib/server/secrets";
 import { getServerStore } from "@/lib/server/store";
 
 /**
- * Исполнитель прогонов интеграций (этапы 8–9): проверка ключей, реальный вызов адаптера,
+ * Исполнитель прогонов интеграций (этапы 8–10): проверка ключей, реальный вызов адаптера,
  * запись в журнал. Этап 9: если синхронизация принесла выборку лидов — она маппится и
  * записывается в снимок (апсерт по детерминированному id ext-<источник>-<внешний id>),
  * а в детали прогона появляются счётчики «импортировано N (новых M, обновлено K)».
- * Ошибка конфигурации (нет ключей) — 400 клиенту; сетевая ошибка внешнего сервиса или
- * ошибка записи — это валидный результат прогона (ok:false) в журнале и интерфейсе.
+ * Этап 10: если адаптер обновил OAuth-токены (rotate) — новые ключи сохраняются в
+ * .data/secrets.json тем же атомарным механизмом, в детали добавляется пометка.
+ * Ошибка конфигурации (нет обязательных ключей) — 400 клиенту; сетевая ошибка внешнего
+ * сервиса или ошибка записи — это валидный результат прогона (ok:false) в журнале и UI.
+ * fetchImpl — секам для unit-тестов; в продакшене используется глобальный fetch.
  */
 
 /** Слаг источника для id лидов: int-amocrm → amocrm, int-demo → demo. */
@@ -27,19 +30,24 @@ function sourceLabel(integrationId: string): string {
   return INTEGRATIONS.find((it) => it.id === integrationId)?.name ?? "Демо-источник";
 }
 
-export async function runIntegration(integrationId: string, action: IntegrationAction): Promise<IntegrationRun> {
+export async function runIntegration(integrationId: string, action: IntegrationAction, fetchImpl: typeof fetch = fetch): Promise<IntegrationRun> {
   const adapter = adapterOf(integrationId);
   if (!adapter) throw new ApiError("not_found", `Для интеграции ${integrationId} адаптер пока не реализован`);
   const saved = credentialsOf(integrationId);
   const creds = saved?.fields ?? {};
-  const missing = adapter.fields.filter((f) => !(creds[f.key] ?? "").trim()).map((f) => f.label);
+  const missing = adapter.fields.filter((f) => (f.required ?? true) && !(creds[f.key] ?? "").trim()).map((f) => f.label);
   if (missing.length > 0) {
     throw new ApiError("validation", `Не заполнены ключи (${missing.join(", ")}) — нажмите «Ключи» и заполните поля`);
   }
   const started = Date.now();
   let outcome: IntegrationRunOutcome | SyncResult;
   try {
-    outcome = action === "check" ? await adapter.check(creds) : await adapter.sync(creds);
+    outcome = action === "check" ? await adapter.check(creds, fetchImpl) : await adapter.sync(creds, fetchImpl);
+    // Этап 10: адаптер мог обновить OAuth-токены — сохраняем новые ключи рядом с остальными.
+    if (outcome.ok && outcome.rotate) {
+      saveCredentials(integrationId, { ...creds, ...outcome.rotate });
+      outcome = { ...outcome, detail: `${outcome.detail}; токен доступа обновлён и сохранён` };
+    }
     // Этап 9: синхронизация с выборкой лидов — апсерт в снимок через серверное хранилище.
     if (action === "sync" && outcome.ok && "leads" in outcome && outcome.leads) {
       const leads = outcome.leads;

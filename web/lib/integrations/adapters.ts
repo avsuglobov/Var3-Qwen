@@ -2,11 +2,13 @@ import { amocrmLead, bitrixLead } from "./import-map";
 import { configError, netError, type ExternalLead, type IntegrationAdapter, type IntegrationRunOutcome } from "./types";
 
 /**
- * Адаптеры внешних сервисов (этапы 8–9): реальные HTTP-запросы выполняются только на сервере.
+ * Адаптеры внешних сервисов (этапы 8–10): реальные HTTP-запросы выполняются только на сервере.
  * Набор полей конфигурации задаёт адаптер — значения вводятся вручную в диалоге «Ключи» и
  * хранятся в .data/secrets.json. Секреты не попадают в тексты результатов: ошибки возвращают
  * только HTTP-статус и короткое пояснение. Этап 9: sync приносит не только доступность, но и
  * выборку лидов (до 25 записей) — их маппинг и запись в снимок делает маршрут синхронизации.
+ * Этап 10: авторизация amoCRM — долгоживущий токен или OAuth-тройка; при OAuth свежие токены
+ * возвращаются в rotate, исполнитель сохраняет их в .data/secrets.json автоматически.
  * В e2e сеть не трогается: реальный обмен покрывают unit-тесты с подставленным fetch,
  * e2e использует webhook-адаптер с адресом самого приложения и демо-источник int-demo.
  */
@@ -34,43 +36,82 @@ async function call(url: string, init: RequestInit, fetchImpl: typeof fetch): Pr
 
 const AMOCRM_SUBDOMAIN_RE = /^[a-z0-9][a-z0-9-]{0,62}$/i;
 
-/** amoCRM (int-amocrm): долгоживущий токен доступа, API v4. OAuth-обновление токена — следующий шаг. */
+/**
+ * Авторизация amoCRM (этап 10): долгоживущий токен или OAuth-тройка (ID интеграции,
+ * секретный ключ, refresh-токен). При OAuth — POST https://app.amocrm.ru/oauth2/access_token
+ * с grant_type=refresh_token; свежие токены возвращаются в rotate — исполнитель сохранит их
+ * в .data/secrets.json (amoCRM сменяет refresh-токен при каждом выпуске доступа).
+ * Итог — либо готовый токен, либо готовый неуспешный outcome.
+ */
+type AmoAuth = { token: string; rotate?: Record<string, string> };
+
+async function amocrmAuth(creds: Record<string, string>, fetchImpl: typeof fetch): Promise<AmoAuth | IntegrationRunOutcome> {
+  const token = (creds.accessToken ?? "").trim();
+  if (token) return { token };
+  const clientId = (creds.clientId ?? "").trim();
+  const clientSecret = (creds.clientSecret ?? "").trim();
+  const refreshToken = (creds.refreshToken ?? "").trim();
+  if (!clientId || !clientSecret || !refreshToken) {
+    return configError("Не задан токен доступа amoCRM и не заполнена OAuth-тройка (ID интеграции, секретный ключ, refresh-токен) — заполните либо токен, либо все три поля");
+  }
+  try {
+    const res = await fetchImpl("https://app.amocrm.ru/oauth2/access_token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, grant_type: "refresh_token", refresh_token: refreshToken }),
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    });
+    if (!res.ok) return { ok: false, detail: `amoCRM не смог обновить токен (HTTP ${res.status}) — проверьте OAuth-поля`, status: res.status };
+    const body = (await res.json().catch(() => null)) as { access_token?: string; refresh_token?: string } | null;
+    if (!body?.access_token) return { ok: false, detail: "amoCRM ответил на обновление токена без access_token", status: res.status };
+    return { token: body.access_token, rotate: { accessToken: body.access_token, refreshToken: body.refresh_token ?? refreshToken } };
+  } catch (e) {
+    return netError(e);
+  }
+}
+
+/** amoCRM (int-amocrm): API v4; авторизация — долгоживущий токен либо OAuth с автообновлением. */
 export const amocrmAdapter: IntegrationAdapter = {
   id: "int-amocrm",
   fields: [
     { key: "subdomain", label: "Поддомен", secret: false, hint: "Например, company — адрес будет company.amocrm.ru" },
-    { key: "accessToken", label: "Токен доступа", secret: true }
+    { key: "accessToken", label: "Токен доступа", secret: true, required: false, hint: "Долгоживущий токен; если пуст — автообновление по OAuth-тройке ниже" },
+    { key: "clientId", label: "ID интеграции (OAuth)", secret: false, required: false, hint: "Необязательно, если задан токен доступа" },
+    { key: "clientSecret", label: "Секретный ключ (OAuth)", secret: true, required: false, hint: "Необязательно, если задан токен доступа" },
+    { key: "refreshToken", label: "Refresh-токен (OAuth)", secret: true, required: false, hint: "Обновляется автоматически при каждом прогоне" }
   ],
   async check(creds, fetchImpl = fetch) {
     const subdomain = (creds.subdomain ?? "").trim();
-    const token = (creds.accessToken ?? "").trim();
     if (!AMOCRM_SUBDOMAIN_RE.test(subdomain)) return configError("Не задан корректный поддомен amoCRM (буквы, цифры и дефис)");
-    if (!token) return configError("Не задан токен доступа amoCRM");
+    const auth = await amocrmAuth(creds, fetchImpl);
+    if (!("token" in auth)) return auth;
     try {
       const res = await fetchImpl(`https://${subdomain}.amocrm.ru/api/v4/accounts?with=version`, {
-        headers: { authorization: `Bearer ${token}` },
+        headers: { authorization: `Bearer ${auth.token}` },
         signal: AbortSignal.timeout(TIMEOUT_MS)
       });
       if (!res.ok) return { ok: false, detail: `amoCRM ответил HTTP ${res.status} (проверьте токен)`, status: res.status };
       const body = (await res.json().catch(() => null)) as { _embedded?: { accounts?: { name?: string; version?: string }[] } } | null;
       const account = body?._embedded?.accounts?.[0];
-      return {
+      const outcome: IntegrationRunOutcome = {
         ok: true,
         detail: account ? `Связь есть: аккаунт «${(account.name ?? "без названия").slice(0, 100)}», API v4${account.version ? ` (версия ${account.version})` : ""}` : `HTTP ${res.status}, аккаунт получен`,
-        status: res.status
+        status: res.status,
+        ...(auth.rotate ? { rotate: auth.rotate } : {})
       };
+      return outcome;
     } catch (e) {
       return netError(e);
     }
   },
   async sync(creds, fetchImpl = fetch) {
     const subdomain = (creds.subdomain ?? "").trim();
-    const token = (creds.accessToken ?? "").trim();
     if (!AMOCRM_SUBDOMAIN_RE.test(subdomain)) return configError("Не задан корректный поддомен amoCRM (буквы, цифры и дефис)");
-    if (!token) return configError("Не задан токен доступа amoCRM");
+    const auth = await amocrmAuth(creds, fetchImpl);
+    if (!("token" in auth)) return auth;
     try {
       const res = await fetchImpl(`https://${subdomain}.amocrm.ru/api/v4/leads?limit=${SYNC_PAGE}`, {
-        headers: { authorization: `Bearer ${token}` },
+        headers: { authorization: `Bearer ${auth.token}` },
         signal: AbortSignal.timeout(TIMEOUT_MS)
       });
       if (!res.ok) return { ok: false, detail: `amoCRM ответил HTTP ${res.status} при запросе сделок`, status: res.status };
@@ -79,7 +120,7 @@ export const amocrmAdapter: IntegrationAdapter = {
         const lead = amocrmLead(raw);
         return lead ? [lead] : [];
       });
-      return { ok: true, detail: `Получено сделок: ${leads.length}`, status: res.status, leads };
+      return { ok: true, detail: `Получено сделок: ${leads.length}`, status: res.status, leads, ...(auth.rotate ? { rotate: auth.rotate } : {}) };
     } catch (e) {
       return netError(e);
     }

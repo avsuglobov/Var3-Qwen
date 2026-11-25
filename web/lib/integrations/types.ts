@@ -14,6 +14,8 @@ export interface IntegrationFieldDef {
   secret: boolean;
   /** Подсказка о формате значения. */
   hint?: string;
+  /** Обязательное по умолчанию; false — необязательная альтернатива (например OAuth-тройка amoCRM). */
+  required?: boolean;
 }
 
 /** Итог одного вызова адаптера (проверки связи или синхронизации). */
@@ -22,6 +24,11 @@ export interface IntegrationRunOutcome {
   detail: string;
   /** HTTP-статус внешнего сервиса; null — до ответа не дошло (сеть, таймаут, некорректная конфигурация). */
   status: number | null;
+  /**
+   * Этап 10: обновившиеся ключи авторизации (OAuth amoCRM), которые исполнитель сохраняет
+   * обратно в .data/secrets.json тем же атомарным механизмом; в браузер не отдаётся.
+   */
+  rotate?: Record<string, string>;
 }
 
 /** Действие прогона. */

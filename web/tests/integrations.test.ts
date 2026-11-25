@@ -6,8 +6,8 @@ import { amocrmAdapter, adapterOf, bitrix24Adapter, demoAdapter, INTEGRATION_ADA
 import { amocrmLead, bitrixLead, externalLeadId, importExternalLeads } from "@/lib/integrations/import-map";
 import { maskSecret, readCredentials, saveCredentials } from "@/lib/server/secrets";
 import { appendRun, readRuns } from "@/lib/server/runs";
+import { runIntegration } from "@/lib/server/integrations";
 import { createLocalApi, createMemoryStorage } from "@/lib/api";
-import type { Lead } from "@/lib/schemas";
 
 /* Этапы 8–9 — слой внешних интеграций: адаптеры с подставленным fetch (сеть не нужна),
    маскирование секретов, хранилище ключей и журнал прогонов во временном .data;
@@ -42,8 +42,14 @@ describe("реестр адаптеров (этапы 8–9)", () => {
     expect(adapterOf("int-demo")).not.toBeNull();
     expect(adapterOf("int-tg")).toBeNull();
   });
-  it("у адаптеров объявлены поля конфигурации, секретные помечены", () => {
-    expect(amocrmAdapter.fields.map((f) => [f.key, f.secret])).toEqual([["subdomain", false], ["accessToken", true]]);
+  it("у адаптеров объявлены поля конфигурации, секретные помечены, OAuth-поля необязательны (этап 10)", () => {
+    expect(amocrmAdapter.fields.map((f) => [f.key, f.secret, f.required ?? true])).toEqual([
+      ["subdomain", false, true],
+      ["accessToken", true, false],
+      ["clientId", false, false],
+      ["clientSecret", true, false],
+      ["refreshToken", true, false]
+    ]);
     expect(bitrix24Adapter.fields.map((f) => [f.key, f.secret])).toEqual([["webhookUrl", true]]);
     expect(webhookAdapter.fields.map((f) => [f.key, f.secret])).toEqual([["url", false]]);
   });
@@ -240,6 +246,93 @@ describe("импорт лидов в снимок (этап 9): апсерт п�
     expect(outcome.ok).toBe(true);
     expect(outcome.leads?.map((l) => l.externalId)).toEqual(["1", "2", "3"]);
     expect((await demoAdapter.check({})).ok).toBe(true);
+  });
+});
+
+describe("OAuth-обновление токена amoCRM (этап 10)", () => {
+  /** Заглушка: refresh-эндпоинт + запрос к API v4 (порядок вызовов важен). */
+  function oauthFetch(): typeof fetch & { seen: { url: string; init?: RequestInit }[] } {
+    const seen: { url: string; init?: RequestInit }[] = [];
+    const impl = (async (url: RequestInfo, init?: RequestInit) => {
+      seen.push({ url: String(url), init });
+      if (String(url).includes("/oauth2/access_token")) {
+        return new Response(JSON.stringify({ access_token: "fresh-at-9999", refresh_token: "fresh-rt-7777" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ _embedded: { accounts: [{ name: "Тест", version: "v4" }] } }), { status: 200 });
+    }) as typeof fetch & { seen: typeof seen };
+    impl.seen = seen;
+    return impl;
+  }
+
+  it("OAuth-тройка вместо токена: refresh, свежие токены в rotate, запрос API на новом Bearer", async () => {
+    const fetchImpl = oauthFetch();
+    const outcome = await amocrmAdapter.check({ subdomain: "company", clientId: "cid-1", clientSecret: "csecret-1", refreshToken: "rt-old" }, fetchImpl);
+    expect(outcome.ok).toBe(true);
+    expect(fetchImpl.seen[0]?.url).toBe("https://app.amocrm.ru/oauth2/access_token");
+    expect(JSON.parse(String(fetchImpl.seen[0]?.init?.body))).toEqual({ client_id: "cid-1", client_secret: "csecret-1", grant_type: "refresh_token", refresh_token: "rt-old" });
+    expect((fetchImpl.seen[1]?.init?.headers as Record<string, string>).authorization).toBe("Bearer fresh-at-9999");
+    expect(outcome.rotate).toEqual({ accessToken: "fresh-at-9999", refreshToken: "fresh-rt-7777" });
+  });
+  it("refresh сорвался (HTTP 400): честный ok:false, API не запрашивался, rotate нет", async () => {
+    const seen: string[] = [];
+    const fetchImpl = (async (url: RequestInfo) => {
+      seen.push(String(url));
+      if (String(url).includes("/oauth2/access_token")) return new Response("bad grant", { status: 400 });
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const outcome = await amocrmAdapter.check({ subdomain: "company", clientId: "cid-1", clientSecret: "csecret-1", refreshToken: "rt-old" }, fetchImpl);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.detail).toContain("не смог обновить токен (HTTP 400)");
+    expect(outcome.status).toBe(400);
+    expect(outcome.rotate).toBeUndefined();
+    expect(seen.length).toBe(1);
+  });
+  it("только долгоживущий токен: OAuth не дёргается, rotate нет", async () => {
+    const seen: string[] = [];
+    const fetchImpl = (async (url: RequestInfo) => {
+      seen.push(String(url));
+      return new Response(JSON.stringify({ _embedded: { accounts: [{ name: "Тест" }] } }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const outcome = await amocrmAdapter.check({ subdomain: "company", accessToken: "amo-token" }, fetchImpl);
+    expect(outcome.ok).toBe(true);
+    expect(seen.length).toBe(1);
+    expect(seen[0]).not.toContain("oauth2");
+    expect(outcome.rotate).toBeUndefined();
+  });
+  it("ни токена, ни тройки: конфиг-ошибка до сети", async () => {
+    let called = 0;
+    const fetchImpl = (async () => {
+      called += 1;
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const outcome = await amocrmAdapter.check({ subdomain: "company" }, fetchImpl);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.detail).toContain("OAuth-тройка");
+    expect(outcome.status).toBeNull();
+    expect(called).toBe(0);
+  });
+  it("синхронизация на OAuth: refresh и выборка лидов в одном прогоне", async () => {
+    const seen: string[] = [];
+    const fetchImpl = (async (url: RequestInfo) => {
+      seen.push(String(url));
+      if (String(url).includes("/oauth2/access_token")) return new Response(JSON.stringify({ access_token: "fresh-at", refresh_token: "fresh-rt" }), { status: 200 });
+      return new Response(JSON.stringify({ _embedded: { leads: [{ id: 5, name: "Сделка Дз", price: 3000 }] } }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const outcome = await amocrmAdapter.sync({ subdomain: "company", clientId: "cid-1", clientSecret: "csecret-1", refreshToken: "rt-old" }, fetchImpl);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.leads).toEqual([{ externalId: "5", name: "Сделка Дз", value: 3000 }]);
+    expect(outcome.rotate).toEqual({ accessToken: "fresh-at", refreshToken: "fresh-rt" });
+    expect(seen[0]).toContain("oauth2");
+  });
+  it("исполнитель сохраняет ротацию в .data/secrets.json и помечает журнал", async () => {
+    saveCredentials("int-amocrm", { subdomain: "company", clientId: "cid-1", clientSecret: "csecret-1", refreshToken: "rt-old" });
+    const run = await runIntegration("int-amocrm", "check", oauthFetch());
+    expect(run.ok).toBe(true);
+    expect(run.detail).toContain("токен доступа обновлён и сохранён");
+    const saved = readCredentials().credentials["int-amocrm"].fields;
+    expect(saved.accessToken).toBe("fresh-at-9999");
+    expect(saved.refreshToken).toBe("fresh-rt-7777");
+    expect(saved.clientId).toBe("cid-1");
   });
 });
 
