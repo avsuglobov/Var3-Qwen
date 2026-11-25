@@ -4,9 +4,10 @@
    (типы PDF/Word/Excel/Сайт/API, бейдж «Индексировано» с точкой). Команда: шаблоны-чипы
    (Услуги/Производство), цепочка узлов со стрелками, подсказка о передаче результата.
    Снабжение: запросы с статусом «Сводка готова» (точка), сводка условий без цен + предупреждение.
-   Аналитика: KPI «—», разбор диалогов (ОК/Нарушение), чат «Вопрос руководителю» с ответом
-   по сценарию («AI-РОП печатает…» → ответ). Пустое сообщение не отправляется.
-   Overflow 375…1920 × 2 темы, контраст AA, внешние запросы, консоль.
+   Аналитика: KPI пересчитываются из данных по правилам согласования (этап 7): качество 33%,
+   нарушений 2, эскалаций 1, «Пересчитать» со статусом и временем; разбор диалогов (ОК/Нарушение),
+   чат «Вопрос руководителю» с ответом по сценарию («AI-РОП печатает…» → ответ).
+   Пустое сообщение не отправляется. Overflow 375…1920 × 2 темы, контраст AA, внешние запросы, консоль.
    Запуск: npm run build && node e2e/ops.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
 import { apiProfile, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
@@ -93,7 +94,12 @@ async function main() {
     // ================= Аналитика
     await open("/analytics");
     check("шапка: «Аналитика», «Разбор диалогов менеджеров и оценка качества цепочки»", (await page.locator("h1").innerText()) === "Аналитика" && (await page.locator("main").innerText()).includes("Разбор диалогов менеджеров и оценка качества цепочки"));
-    check("KPI ×3: «—» с подсказками (демо-оценка, выборка, согласование)", (await page.locator("[data-testid=analytics-kpi-quality]").innerText()) === "—" && (await page.locator("[data-testid=analytics-kpi-violations]").innerText()) === "—" && (await page.locator("[data-testid=analytics-kpi-escalations]").innerText()) === "—");
+    check("KPI пересчитаны (этап 7): качество 33%, нарушений 2, эскалаций 1 (лид с «Эскалация»)", (await page.locator("[data-testid=analytics-kpi-quality]").innerText()) === "33%" && (await page.locator("[data-testid=analytics-kpi-violations]").innerText()) === "2" && (await page.locator("[data-testid=analytics-kpi-escalations]").innerText()) === "1");
+    check("кнопка «Пересчитать»: статус с временем и объёмом выборки (6 лидов, 3 диалога)", (await page.locator("[data-testid=analytics-recalc]").count()) === 1);
+    await page.locator("[data-testid=analytics-recalc]").click();
+    await page.waitForFunction(() => /Пересчитано в \d{2}:\d{2}/.test(document.querySelector("[data-testid=analytics-feedback]")?.textContent ?? ""), { timeout: 8000 });
+    const recalcText = await page.locator("[data-testid=analytics-feedback]").innerText();
+    check("после пересчёта: «Пересчитано в ЧЧ:ММ — лидов: 6, диалогов: 3»", recalcText.includes("лидов: 6") && recalcText.includes("диалогов: 3"));
     const row1a = await page.locator("[data-testid=analytics-row][data-conv=cv-1]").innerText();
     const row2a = await page.locator("[data-testid=analytics-row][data-conv=cv-2]").innerText();
     check("разбор: cv-1 «Нарушение» + текст, cv-2 «ОК»", row1a.includes("Нарушение") && row1a.includes("Пропущен уточняющий вопрос") && row2a.includes("ОК") && !row2a.includes("Нарушение"));
