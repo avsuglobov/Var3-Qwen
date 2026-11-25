@@ -168,3 +168,36 @@ export function funnelStages(funnel: Funnel, stages: readonly Stage[]): Stage[] 
   const byId = new Map(stages.map((s) => [s.id, s]));
   return funnel.stages.map((id) => byId.get(id)).filter((s): s is Stage => !!s).sort((a, b) => a.order - b.order);
 }
+
+/* ---------------------------------------------------------------- синхронизация с внешними CRM (этап 6) */
+
+/** Внешние CRM из справочника интеграций (id записей INTEGRATIONS, генерируются gen:seed). */
+export const CRM_SYNC_IDS = ["int-amocrm", "int-bitrix"] as const;
+
+export interface CrmSyncRow {
+  id: string;
+  name: string;
+  connected: boolean;
+}
+
+/** Строки статуса синхронизации: внешние CRM из справочника интеграций в его порядке. Вход не мутируется. */
+export function crmSyncRows(integrations: readonly { id: string; name: string; connected: boolean }[]): CrmSyncRow[] {
+  return CRM_SYNC_IDS.map((id) => integrations.find((i) => i.id === id))
+    .filter((i): i is { id: string; name: string; connected: boolean } => !!i)
+    .map((i) => ({ id: i.id, name: i.name, connected: i.connected }));
+}
+
+/**
+ * Текст бейджа синхронизации в шапке CRM: «Синхр. amoCRM: ОК · Bitrix24: ОК»;
+ * у неподключённой — «нет связи»; без внешних CRM в справочнике — «нет подключения».
+ * Статусы берутся из справочника интеграций (демо-данные), время синхронизации не выдумывается.
+ */
+export function crmSyncLabel(rows: readonly CrmSyncRow[]): string {
+  if (rows.length === 0) return "Синхр. с CRM: нет подключения";
+  return "Синхр. " + rows.map((r) => `${r.name}: ${r.connected ? "ОК" : "нет связи"}`).join(" · ");
+}
+
+/** Есть ли хотя бы одна подключённая внешняя CRM (точка бейджа не только цветом — текст рядом). */
+export function crmSyncOk(rows: readonly CrmSyncRow[]): boolean {
+  return rows.some((r) => r.connected);
+}

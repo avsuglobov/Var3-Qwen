@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { SEED_DATA } from "@/lib/mock-data/seed";
-import { FUNNELS, STAGES } from "@/lib/mock-data/reference";
+import { FUNNELS, INTEGRATIONS, STAGES } from "@/lib/mock-data/reference";
 import {
   ACTOR_META,
   CRM_SORTS,
   buildLead,
   conversationForLead,
+  crmSyncLabel,
+  crmSyncOk,
+  crmSyncRows,
   createdLeadEvent,
   filterByStage,
   funnelLeads,
@@ -130,5 +133,35 @@ describe("связи с диалогами и демо-данные", () => {
     for (const f of FUNNELS) {
       for (const s of f.stages) expect(STAGES.some((st) => st.id === s), `${f.id}:${s}`).toBe(true);
     }
+  });
+});
+
+describe("синхронизация с внешними CRM (этап 6)", () => {
+  const ref = [
+    { id: "int-amocrm", name: "amoCRM", connected: true },
+    { id: "int-bitrix", name: "Bitrix24", connected: true }
+  ];
+  it("crmSyncRows: внешние CRM из справочника в его порядке, остальное не попадает", () => {
+    expect(crmSyncRows([...ref, { id: "int-tg", name: "Telegram", connected: true }])).toEqual([
+      { id: "int-amocrm", name: "amoCRM", connected: true },
+      { id: "int-bitrix", name: "Bitrix24", connected: true }
+    ]);
+    expect(crmSyncRows([{ id: "int-tg", name: "Telegram", connected: true }])).toEqual([]);
+    expect(crmSyncRows([])).toEqual([]);
+  });
+  it("crmSyncLabel: подключённые — «ОК», неподключённые — «нет связи», без CRM — «нет подключения»", () => {
+    expect(crmSyncLabel(crmSyncRows(ref))).toBe("Синхр. amoCRM: ОК · Bitrix24: ОК");
+    expect(crmSyncLabel(crmSyncRows([{ id: "int-amocrm", name: "amoCRM", connected: false }, ref[1]]))).toBe("Синхр. amoCRM: нет связи · Bitrix24: ОК");
+    expect(crmSyncLabel(crmSyncRows([]))).toBe("Синхр. с CRM: нет подключения");
+  });
+  it("crmSyncOk: есть подключённая CRM — true; все отключены — false", () => {
+    expect(crmSyncOk(crmSyncRows(ref))).toBe(true);
+    expect(crmSyncOk(crmSyncRows([{ id: "int-amocrm", name: "amoCRM", connected: false }]))).toBe(false);
+    expect(crmSyncOk([])).toBe(false);
+  });
+  it("демо-сид: обе внешние CRM подключены (бейдж шапки честно отражает справочник)", () => {
+    const rows = crmSyncRows(INTEGRATIONS);
+    expect(rows.length).toBe(2);
+    expect(crmSyncLabel(rows)).toBe("Синхр. amoCRM: ОК · Bitrix24: ОК");
   });
 });

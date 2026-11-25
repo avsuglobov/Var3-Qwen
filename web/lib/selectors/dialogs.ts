@@ -35,10 +35,31 @@ export function contextStatus(mode: ConversationMode): string {
 export function addMessagePatch(conv: Conversation, msg: ChatMessage, mode?: ConversationMode): Partial<Conversation> {
   return {
     messages: [...conv.messages, msg],
-    lastPreview: msg.text,
+    lastPreview: messagePreview(msg) || conv.lastPreview,
     lastTime: msg.time ?? conv.lastTime,
     ...(mode ? { mode } : {})
   };
+}
+
+/**
+ * Превью сообщения в списке диалогов: текст; у сообщения без текста, но с вложениями (этап 6) —
+ * «📎 имена файлов», чтобы список не показывал пустую строку.
+ */
+export function messagePreview(msg: ChatMessage): string {
+  if (msg.text) return msg.text;
+  const names = msg.attachments?.map((a) => a.name).join(", ") ?? "";
+  return names ? "📎 " + names : "";
+}
+
+/** Человекочитаемый размер вложения: байты, КБ и МБ с одним знаком после запятой (ru-формат). */
+export function fmtBytes(size: number): string {
+  if (size < 1024) return `${size} Б`;
+  if (size < 1024 * 1024) {
+    const kb = size / 1024;
+    return `${(Number.isInteger(kb) ? String(kb) : kb.toFixed(1).replace(".", ","))} КБ`;
+  }
+  const mb = size / (1024 * 1024);
+  return `${mb.toFixed(1).replace(".", ",").replace(",0", "")} МБ`;
 }
 
 /** Время сообщения — UTC ЧЧ:ММ (как db.nowHM прототипа и часы в верхней панели). */

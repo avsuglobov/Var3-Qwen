@@ -47,7 +47,28 @@ export const leadSchema = z.object({
   events: z.array(leadEventSchema)
 });
 
-export const messageSchema = z.object({ from: z.enum(["client", "ai", "human"]), text: text(10000), time: optText });
+/* ---------------------------------------------------------------- вложения диалогов (этап 6) */
+/** Лимиты: не больше трёх файлов на сообщение, каждый — до 1 МБ (содержимое хранится в снимке в base64). */
+export const MAX_MESSAGE_ATTACHMENTS = 3;
+export const MAX_ATTACHMENT_BYTES = 1_048_576;
+/** Граница поля data в снимке: base64 раздувает файл на ~⅓ (1 МБ → ~1,37 млн знаков) — с запасом до 1,5 млн. */
+export const MAX_ATTACHMENT_DATA = 1_500_000;
+
+export const attachmentSchema = z.object({
+  /** Имя файла не бывает пустым (используется как имя при скачивании) — в отличие от текстовых полей. */
+  name: z.string().min(1).max(300),
+  size: z.number().int().min(1).max(MAX_ATTACHMENT_BYTES),
+  mime: optText,
+  /** Содержимое файла в base64; в демо-сидах вложений нет — поле необязательное. */
+  data: z.string().max(MAX_ATTACHMENT_DATA).optional()
+});
+
+export const messageSchema = z.object({
+  from: z.enum(["client", "ai", "human"]),
+  text: text(10000),
+  time: optText,
+  attachments: z.array(attachmentSchema).max(MAX_MESSAGE_ATTACHMENTS).nullish()
+});
 
 export const conversationSchema = z.object({
   id,
@@ -112,8 +133,21 @@ export const agentSchema = z.object({
   approvals: z.array(approvalRuleSchema)
 });
 
+/** Вопрос теста курса: 2–6 вариантов, один верный (порог — QUIZ_PASS); у демо-курсов и у созданных пользователем (этап 6). */
+export const quizQuestionSchema = z.object({
+  q: text(500),
+  options: z.array(text(300)).min(2).max(6),
+  answer: z.number().int().min(0).max(5)
+});
+
 export const courseSchema = z.object({
-  id, title: text(300), lessons: z.number().int().min(0).max(200), progress: z.number().min(0).max(1), status: text(60)
+  id, title: text(300), lessons: z.number().int().min(0).max(200), progress: z.number().min(0).max(1), status: text(60),
+  /** Названия уроков созданного пользователем курса; у демо-сида задано только число уроков. */
+  lessonTitles: z.array(text(300)).nullish(),
+  /** Тест курса: у демо-курсов вопросы в справочнике QUIZZES, у созданных — в записи. */
+  questions: z.array(quizQuestionSchema).nullish(),
+  /** false — курс создан пользователем; у демо-сида поле не задано, записи демонстрационные. */
+  demo: z.boolean().nullish()
 });
 
 export const certificateSchema = z.object({
@@ -137,13 +171,6 @@ export const integrationSchema = z.object({ id, name: text(100), desc: text(300)
 
 export const companyProfileSchema = z.object({ name: text(300), about: text(2000), audience: text(2000) });
 
-/** Вопрос демо-теста курса: 2–6 вариантов, один верный (порог — QUIZ_PASS). */
-export const quizQuestionSchema = z.object({
-  q: text(500),
-  options: z.array(text(300)).min(2).max(6),
-  answer: z.number().int().min(0).max(5)
-});
-
 export type KnowledgeSource = z.infer<typeof knowledgeSourceSchema>;
 export type ChainNode = z.infer<typeof chainNodeSchema>;
 export type ChainTemplate = z.infer<typeof chainTemplateSchema>;
@@ -160,6 +187,7 @@ export type Funnel = z.infer<typeof funnelSchema>;
 export type ActivityPoint = z.infer<typeof activityPointSchema>;
 export type LeadEvent = z.infer<typeof leadEventSchema>;
 export type Lead = z.infer<typeof leadSchema>;
+export type Attachment = z.infer<typeof attachmentSchema>;
 export type Message = z.infer<typeof messageSchema>;
 export type Conversation = z.infer<typeof conversationSchema>;
 export type Document = z.infer<typeof documentSchema>;

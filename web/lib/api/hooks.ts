@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getApi } from "@/lib/api";
-import type { Agent, CompanyProfile, Conversation, Document, Lead, OnboardingStep, Task } from "@/lib/schemas";
+import type { Agent, CompanyProfile, Conversation, Course, Document, Lead, OnboardingStep, Task } from "@/lib/schemas";
 
 /** Ключи запросов. Все данные приходят через интерфейс Api (localStorage сейчас, REST потом). */
 export const qk = {
@@ -61,6 +61,15 @@ export function useCompleteCourse() {
       qc.invalidateQueries({ queryKey: qk.courses });
       qc.invalidateQueries({ queryKey: qk.certificates });
     }
+  });
+}
+
+/** Создание курса (этап 6): запись появляется в списке после подтверждения адаптером. */
+export function useCreateCourse() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (course: Course) => getApi().courses.create(course),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.courses })
   });
 }
 

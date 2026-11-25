@@ -1,7 +1,8 @@
 "use client";
 
-import { Download, FileCheck2 } from "lucide-react";
+import { Download, FileCheck2, Plus } from "lucide-react";
 import { useState } from "react";
+import { CreateCourseDialog } from "@/components/training/create-course-dialog";
 import { QuizDialog } from "@/components/training/quiz-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,12 +12,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/state";
 import { useCertificates, useCourses, useQuizzes } from "@/lib/api/hooks";
 import { courseAction, pctOf } from "@/lib/selectors/training";
-import type { Course } from "@/lib/schemas";
+import type { Course, QuizQuestion } from "@/lib/schemas";
 
 /**
  * Раздел «Обучение» (этап 3, группа 7) — поведение training() прототипа: карточки курсов
  * (прогресс-бар, «N уроков · статус · тест: M вопр.», кнопка «Сертификат» у завершённых
  * и «Пройти тест» у курсов с демо-тестом), список выданных сертификатов с выгрузкой PDF.
+ * Этап 6 добавил «Создать курс»: у записей пользователя тест хранится в самой записи (demo:false).
  */
 export function TrainingView() {
   const coursesQ = useCourses();
@@ -24,6 +26,9 @@ export function TrainingView() {
   const quizzesQ = useQuizzes();
 
   const [quizCourse, setQuizCourse] = useState<Course | null>(null);
+  /** Вопросы теста, зафиксированные при клике: у демо-курсов — из справочника, у созданных — из записи. */
+  const [quizQuestions, setQuizQuestions] = useState<readonly QuizQuestion[] | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; kind: "status" | "alert" }>({ text: "", kind: "status" });
 
   const onFeedback = (text: string, kind: "status" | "alert" = "status"): void => setFeedback({ text, kind });
@@ -55,7 +60,7 @@ export function TrainingView() {
   if (loading) {
     return (
       <div className="min-w-0 space-y-6" aria-busy="true" aria-label="Загрузка обучения">
-        <Header />
+        <Header onCreate={() => undefined} />
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <Skeleton className="h-44" />
           <Skeleton className="h-44" />
@@ -67,7 +72,7 @@ export function TrainingView() {
   if (error) {
     return (
       <div className="min-w-0 space-y-6">
-        <Header />
+        <Header onCreate={() => undefined} />
         <ErrorState message={error.message} onRetry={() => { void coursesQ.refetch(); void certificatesQ.refetch(); void quizzesQ.refetch(); }} />
       </div>
     );
@@ -75,7 +80,7 @@ export function TrainingView() {
 
   return (
     <div className="min-w-0 space-y-6">
-      <Header />
+      <Header onCreate={() => setCreateOpen(true)} />
 
       {feedback.text ? (
         <p role={feedback.kind} aria-live="polite" className="text-[13px]" data-testid="training-feedback">
@@ -86,7 +91,7 @@ export function TrainingView() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" data-testid="training-courses">
         {courses.map((c) => {
           const pct = pctOf(c.progress);
-          const quiz = quizzes[c.id];
+          const quiz = quizzes[c.id] ?? c.questions ?? undefined;
           const action = courseAction(c.progress, !!quiz);
           return (
             <Card key={c.id}>
@@ -95,9 +100,12 @@ export function TrainingView() {
                   <span className="min-w-0 text-sm font-semibold" data-testid="training-course-title">
                     {c.title}
                   </span>
-                  <Badge variant="outline" className="text-[11px]">
-                    Демо
-                  </Badge>
+                  {/* «Демо» — только у записей демо-справочника; курс пользователя (demo:false) — свой контент */}
+                  {c.demo !== false ? (
+                    <Badge variant="outline" className="text-[11px]" data-testid="training-demo-badge">
+                      Демо
+                    </Badge>
+                  ) : null}
                 </div>
                 <div className="mb-3 text-xs text-muted-foreground">
                   {c.lessons} уроков · {c.status}
@@ -119,7 +127,7 @@ export function TrainingView() {
                     <Button
                       variant="secondary"
                       size="sm"
-                      onClick={() => { clearFeedback(); setQuizCourse(c); }}
+                      onClick={() => { clearFeedback(); setQuizCourse(c); setQuizQuestions(quiz ?? null); }}
                       data-testid="training-quiz-btn"
                       data-course={c.id}
                     >
@@ -163,23 +171,38 @@ export function TrainingView() {
         </Card>
       </section>
 
-      {quizCourse && quizzes[quizCourse.id] ? (
+      {quizCourse && quizQuestions ? (
         <QuizDialog
           course={{ id: quizCourse.id, title: quizCourse.title }}
-          questions={quizzes[quizCourse.id]}
+          questions={quizQuestions}
           pass={quizzesQ.data?.pass ?? 0.7}
           onOpenChange={(next) => { if (!next) setQuizCourse(null); }}
         />
       ) : null}
+
+      <CreateCourseDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        courses={courses}
+        onCreated={(course) => onFeedback(`Курс создан: ${course.title}`)}
+      />
     </div>
   );
 }
 
-function Header() {
+function Header({ onCreate }: { onCreate: () => void }) {
   return (
     <header className="min-w-0">
-      <h1 className="text-[28px] leading-tight">Обучение</h1>
-      <p className="mt-1 text-sm text-muted-foreground">Программы из материалов хранилища, тесты, сертификаты</p>
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-[28px] leading-tight">Обучение</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Программы из материалов хранилища, тесты, сертификаты</p>
+        </div>
+        <Button onClick={onCreate} data-testid="training-new-btn">
+          <Plus aria-hidden />
+          Создать курс
+        </Button>
+      </div>
     </header>
   );
 }

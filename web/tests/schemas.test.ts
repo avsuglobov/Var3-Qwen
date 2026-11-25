@@ -4,7 +4,7 @@ import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 import { ACTIVITY, CHANNELS, FUNNELS, STAGES } from "@/lib/mock-data/reference";
 import { SEED_DATA } from "@/lib/mock-data/seed";
-import { CHANNEL_IDS, COMPANY_PROFILE_SCHEMA, COLLECTION_NAMES, ID_RE, agentSchema, certificateSchema, courseSchema, leadSchema, parseCollection } from "@/lib/schemas";
+import { CHANNEL_IDS, COMPANY_PROFILE_SCHEMA, COLLECTION_NAMES, ID_RE, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_DATA, MAX_MESSAGE_ATTACHMENTS, agentSchema, attachmentSchema, certificateSchema, courseSchema, leadSchema, messageSchema, parseCollection } from "@/lib/schemas";
 import { ROOT } from "./helpers";
 import { applyAINaming } from "../scripts/ai-naming.mjs";
 
@@ -116,5 +116,34 @@ describe("правила полей (из db.js)", () => {
   });
   it("документ: сумма не выдумывается — допускается null/отсутствие", () => {
     expect(SEED_DATA.DOCUMENTS.every((d) => d.amount == null)).toBe(true);
+  });
+});
+
+describe("вложения сообщений (этап 6)", () => {
+  const base = { from: "human", text: "привет", time: "12:00" };
+  const att = (patch: Record<string, unknown> = {}): Record<string, unknown> => ({ name: "файл.txt", size: 10, mime: "text/plain", data: "aGk=", ...patch });
+  it("сообщение без вложений валидно, как раньше; с вложениями — тоже", () => {
+    expect(messageSchema.safeParse(base).success).toBe(true);
+    expect(messageSchema.safeParse({ ...base, attachments: [att()] }).success).toBe(true);
+    expect(messageSchema.safeParse({ ...base, attachments: null }).success).toBe(true);
+    expect(messageSchema.safeParse({ ...base, attachments: [] }).success).toBe(true);
+  });
+  it("не больше трёх файлов на сообщение", () => {
+    const many = Array.from({ length: MAX_MESSAGE_ATTACHMENTS + 1 }, () => att());
+    expect(messageSchema.safeParse({ ...base, attachments: many }).success).toBe(false);
+    expect(messageSchema.safeParse({ ...base, attachments: many.slice(0, MAX_MESSAGE_ATTACHMENTS) }).success).toBe(true);
+  });
+  it("файл больше 1 МБ отклоняется; граница ровно в 1 МБ проходит", () => {
+    expect(attachmentSchema.safeParse(att({ size: MAX_ATTACHMENT_BYTES })).success).toBe(true);
+    expect(attachmentSchema.safeParse(att({ size: MAX_ATTACHMENT_BYTES + 1 })).success).toBe(false);
+    expect(attachmentSchema.safeParse(att({ size: 0 })).success).toBe(false);
+  });
+  it("base64-поле ограничено (снимок не раздувается), пустое имя отклоняется", () => {
+    expect(attachmentSchema.safeParse(att({ data: "x".repeat(MAX_ATTACHMENT_DATA) })).success).toBe(true);
+    expect(attachmentSchema.safeParse(att({ data: "x".repeat(MAX_ATTACHMENT_DATA + 1) })).success).toBe(false);
+    expect(attachmentSchema.safeParse(att({ name: "" })).success).toBe(false);
+  });
+  it("сообщение с вложениями и длинным текстом (>10000) по-прежнему отклоняется", () => {
+    expect(messageSchema.safeParse({ ...base, text: "x".repeat(10001), attachments: [att()] }).success).toBe(false);
   });
 });

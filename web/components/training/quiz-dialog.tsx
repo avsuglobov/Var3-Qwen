@@ -96,12 +96,12 @@ export function QuizDialog({ course, questions, pass, onOpenChange }: {
     <Dialog open onOpenChange={(next) => { if (!saving && !complete.isPending) onOpenChange(next); }}>
       <DialogContent data-testid="quiz-dialog">
         <DialogTitle className="pr-8 text-[15px] font-medium">Тест · {course.title}</DialogTitle>
-        <DialogDescription className="sr-only">Демо-тест по материалам курса</DialogDescription>
+        <DialogDescription className="sr-only">Тест по материалам курса</DialogDescription>
 
         {stage === "intro" ? (
           <div className="space-y-4" data-testid="quiz-intro">
             <p className="text-[13px] text-muted-foreground">
-              Вопросов: {questions.length} · проходной балл: {pctOf(pass)}%. Демо-тест по материалам курса.
+              Вопросов: {questions.length} · проходной балл: {pctOf(pass)}%. Тест по материалам курса.
             </p>
             <div className="space-y-1.5">
               <label htmlFor="quizName" className="text-[13px] font-medium text-muted-foreground">
