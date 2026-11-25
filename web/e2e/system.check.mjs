@@ -1,11 +1,12 @@
 /* system.check.mjs — браузерные проверки финальной группы «Интеграции, Настройки, Помощь»
-   (этап 3). Интеграции: 8 карточек со статусами «Подключено/Не подключено», кнопки «скоро»
-   не переносятся, «Запросить интеграцию» с обратной связью. Настройки: 7 вкладок, демо-значения
-   полей, роли, каналы (первые 3 акцентные), переключатели уведомлений (мышь и пробел), тариф
-   без кнопки, вкладка «Данные»: экспорт файла (валидный JSON версии 1), импорт с обратной
-   связью, битый файл → ошибка, сброс к демо. Помощь: карточка поддержки, чат обучения с
-   ответом по сценарию («Помощь печатает…»), Enter отправляет, пустое — нет.
-   Overflow 375…1920 × 2 темы, контраст AA, внешние запросы, консоль.
+   (этап 3). Интеграции: 8 карточек со статусами «Подключено/Не подключено», «Подключить»/
+   «Отключить» с сохранением в профиле и после перезагрузки + бейдж CRM «нет связи» (этап 7),
+   «Запросить интеграцию» с обратной связью. Настройки: 7 вкладок, демо-значения
+   полей, роли, каналы (первые 3 акцентные), переключатели уведомлений (мышь и пробел), тариф:
+   выбор и сохранение в профиле с перезагрузкой (этап 7), вкладка «Данные»: экспорт файла
+   (валидный JSON версии 1), импорт с обратной связью, битый файл → ошибка, сброс к демо.
+   Помощь: карточка поддержки, чат обучения с ответом по сценарию («Помощь печатает…»),
+   Enter отправляет, пустое — нет. Overflow 375…1920 × 2 темы, контраст AA, внешние запросы, консоль.
    Запуск: npm run build && node e2e/system.check.mjs */
 import fs from "node:fs";
 import os from "node:os";
@@ -33,7 +34,7 @@ async function main() {
     const prepare = async (fn, arg) => { await origin(); await page.evaluate(fn, arg); };
     const reset = async () => { await apiReset(); await prepare(() => localStorage.clear()); };
     const open = async (url = "/integrations") => {
-      const waitSel = { "/integrations": "[data-testid=integrations-card]", "/settings": "[data-testid=settings-tab-profile]", "/help": "[data-testid=help-chat]" }[url];
+      const waitSel = { "/integrations": "[data-testid=integrations-card]", "/settings": "[data-testid=settings-tab-profile]", "/help": "[data-testid=help-chat]", "/crm": "[data-testid=crm-sync]" }[url];
       for (let attempt = 0; attempt < 3; attempt++) {
         await page.goto(BASE + url, { waitUntil: "networkidle" });
         try {
@@ -59,9 +60,20 @@ async function main() {
     check("amoCRM: «Синхронизация сделок и контактов», «Подключено»", amocrm.includes("Синхронизация сделок и контактов") && amocrm.includes("Подключено") && !amocrm.includes("Не подключено"));
     check("WhatsApp: «Не подключено»", (await page.locator("[data-testid=integrations-card][data-int=int-wa]").innerText()).includes("Не подключено"));
     check("статусов «Подключено» — 4 (amoCRM, Bitrix24, Telegram, REST API)", (await page.locator("[data-testid=integrations-card]:has-text('Подключено')").filter({ hasNot: page.locator("text=Не подключено") }).count()) >= 4 && (await page.locator("[data-testid=integrations-card]").filter({ hasText: "Не подключено" }).count()) === 4);
-    check("кнопки «скоро» («Настроить», «Подключить») не переносятся", (await page.getByRole("button", { name: "Настроить" }).count()) === 0 && (await page.getByRole("button", { name: "Подключить" }).count()) === 0);
+    check("у карточек «Подключить»/«Отключить» (этап 7), кнопка «Настроить» («скоро») не переносится", (await page.getByRole("button", { name: "Настроить" }).count()) === 0 && (await page.locator("[data-testid=integrations-toggle]").count()) === 8);
     await page.locator("[data-testid=integrations-request]").click();
     check("«Запросить интеграцию»: «Запрос интеграции отправлен (демо)»", (await page.locator("[data-testid=integrations-feedback]").innerText()).includes("Запрос интеграции отправлен"));
+    // ---------- подключение/отключение с сохранением (этап 7)
+    await page.locator("[data-testid=integrations-toggle][data-int=int-amocrm]").click();
+    await page.waitForFunction(() => document.querySelector("[data-testid=integrations-card][data-int=int-amocrm]")?.textContent?.includes("Не подключено"), { timeout: 8000 });
+    check("отключение amoCRM: бейдж «Не подключено», состояние на сервере (connections)", (await profileOf())?.connections?.some((c) => c.id === "int-amocrm" && !c.connected) === true);
+    await page.locator("[data-testid=integrations-toggle][data-int=int-wa]").click();
+    await page.waitForFunction(() => document.querySelector("[data-testid=integrations-card][data-int=int-wa]")?.textContent?.includes("Подключено"), { timeout: 8000 });
+    check("подключение WhatsApp: бейдж «Подключено», на сервере оба состояния", (await profileOf())?.connections?.some((c) => c.id === "int-wa" && c.connected) === true);
+    await open("/integrations");
+    check("перезагрузка: amoCRM отключена, WhatsApp подключена", (await page.locator("[data-testid=integrations-card][data-int=int-amocrm]").innerText()).includes("Не подключено") && (await page.locator("[data-testid=integrations-card][data-int=int-wa]").innerText()).includes("Подключено"));
+    await open("/crm");
+    check("CRM: бейдж синхронизации показывает «amoCRM: нет связи» (связка с этапом 6)", /Синхр\..*amoCRM: нет связи/.test(await page.locator("[data-testid=crm-sync]").innerText()));
 
     // ================= Настройки
     await open("/settings");

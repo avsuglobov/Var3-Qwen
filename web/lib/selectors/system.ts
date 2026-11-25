@@ -1,3 +1,5 @@
+import type { Integration } from "@/lib/schemas";
+
 /**
  * Чистые функции и константы финальной группы этапа 3 — «Интеграции, Настройки, Помощь»:
  * данные захардкожены в разделах прототипа (sections2.js integrations()/settings()/help()),
@@ -9,6 +11,20 @@
 /** Текст статус-бейджа карточки (status-badge on/off прототипа). */
 export function integrationStatusText(connected: boolean): string {
   return connected ? "Подключено" : "Не подключено";
+}
+
+/**
+ * Наложение сохранённых состояний подключений на справочник (этап 7): у интеграции
+ * с сохранённым состоянием — оно, у остальных — статус справочника; неизвестные id
+ * игнорируются, вход не мутируется.
+ */
+export function applyConnectionStates(
+  reference: readonly Integration[],
+  saved: readonly { id: string; connected: boolean }[] | null | undefined
+): Integration[] {
+  if (!saved || saved.length === 0) return [...reference];
+  const map = new Map(saved.map((c) => [c.id, c.connected]));
+  return reference.map((it) => (map.has(it.id) ? { ...it, connected: map.get(it.id) === true } : it));
 }
 
 /* ----------------------------------------------------------- Настройки */

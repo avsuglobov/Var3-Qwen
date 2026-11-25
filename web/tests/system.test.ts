@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ApiError, createLocalApi, createMemoryStorage } from "@/lib/api";
 import { INTEGRATIONS } from "@/lib/mock-data/reference";
 import { SEED_DATA } from "@/lib/mock-data/seed";
+import type { CompanyProfile } from "@/lib/schemas";
 import {
   DEFAULT_SETTINGS_TAB,
   DEFAULT_TARIFF,
@@ -12,6 +13,7 @@ import {
   SETTINGS_DEFAULTS,
   SETTINGS_TABS,
   TARIFFS,
+  applyConnectionStates,
   importFeedback,
   integrationStatusText
 } from "@/lib/selectors/system";
@@ -127,5 +129,36 @@ describe("тариф (этап 7)", () => {
   it("слишком длинное название тарифа отклоняется схемой профиля", async () => {
     const api = createLocalApi({ storage: createMemoryStorage() });
     await expect(api.companyProfile.update({ tariff: "x".repeat(2001) })).rejects.toMatchObject({ code: "validation" });
+  });
+});
+
+describe("состояния подключений интеграций (этап 7)", () => {
+  const reference = INTEGRATIONS;
+  it("без сохранённых состояний — статусы справочника (вход не мутируется)", () => {
+    const out = applyConnectionStates(reference, null);
+    expect(out).toEqual(reference);
+    expect(out).not.toBe(reference);
+    expect(applyConnectionStates(reference, [])).toEqual(reference);
+  });
+  it("сохранённое состояние перекрывает справочник, неизвестные id игнорируются", () => {
+    const out = applyConnectionStates(reference, [{ id: "int-amocrm", connected: false }, { id: "no-such", connected: true }]);
+    const amocrm = out.find((i) => i.id === "int-amocrm");
+    expect(amocrm?.connected).toBe(false);
+    expect(reference.find((i) => i.id === "int-amocrm")?.connected).toBe(true);
+    const rest = out.filter((i) => i.id !== "int-amocrm");
+    expect(rest).toEqual(reference.filter((i) => i.id !== "int-amocrm"));
+  });
+  it("переключение туда-обратно возвращает исходный статус", () => {
+    const off = applyConnectionStates(reference, [{ id: "int-wa", connected: true }]);
+    expect(off.find((i) => i.id === "int-wa")?.connected).toBe(true);
+    const back = applyConnectionStates(reference, [{ id: "int-wa", connected: false }]);
+    expect(back.find((i) => i.id === "int-wa")?.connected).toBe(false);
+  });
+  it("профиль хранит connections и валидирует формат id", async () => {
+    const api = createLocalApi({ storage: createMemoryStorage() });
+    const saved = await api.companyProfile.update({ connections: [{ id: "int-tg", connected: false }] });
+    expect(saved.connections).toEqual([{ id: "int-tg", connected: false }]);
+    await expect(api.companyProfile.update({ connections: [{ id: "плохой id!", connected: true }] })).rejects.toMatchObject({ code: "validation" });
+    await expect(api.companyProfile.update({ connections: [{ id: "int-tg", connected: "да" }] as unknown as CompanyProfile["connections"] })).rejects.toMatchObject({ code: "validation" });
   });
 });
