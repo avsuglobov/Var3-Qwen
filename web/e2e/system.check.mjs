@@ -85,7 +85,16 @@ async function main() {
     check("пробел переключает «Новый лид» с клавиатуры (aria-checked=false)", (await sws[0].getAttribute("aria-checked")) === "false");
     await page.locator("[data-testid=settings-tab-tariff]").click();
     const tariffText = await page.locator("main").innerText();
-    check("тариф: «Тариф: Демо», «Пробный период», цены скрыты, кнопки «скоро» нет", tariffText.includes("Тариф: Демо") && tariffText.includes("Пробный период") && tariffText.includes("Цены не показываются (демо)") && (await page.getByRole("button", { name: "Выбрать тариф" }).count()) === 0);
+    check("тариф: «Тариф: Демо», цены скрыты, есть выбор и сохранение (этап 7)", tariffText.includes("Тариф: Демо") && tariffText.includes("Цены не показываются (демо)") && (await page.locator("[data-testid=settings-tariff-select]").count()) === 1 && (await page.locator("[data-testid=settings-tariff-save]").count()) === 1 && (await page.locator("[data-testid=settings-tariff-select] option").count()) === 3);
+    await page.locator("[data-testid=settings-tariff-select]").selectOption("Базовый");
+    await page.locator("[data-testid=settings-tariff-save]").click();
+    await page.waitForFunction(() => document.querySelector("[data-testid=settings-tariff-feedback]")?.textContent?.includes("Тариф сохранён"), { timeout: 8000 });
+    check("смена тарифа: «Тариф сохранён: Базовый», записан в профиле на сервере", /Тариф: Базовый/.test(await page.locator("[data-testid=settings-tariff-name]").innerText()) && (await profileOf())?.tariff === "Базовый");
+    await open("/settings");
+    await page.locator("[data-testid=settings-tab-tariff]").click();
+    check("перезагрузка: тариф «Базовый» сохранён", /Тариф: Базовый/.test(await page.locator("[data-testid=settings-tariff-name]").innerText()) && (await page.locator("[data-testid=settings-tariff-save]").isDisabled()));
+    await page.locator("[data-testid=settings-tariff-select]").selectOption("Демо");
+    check("возврат к сиду: кнопка активна при изменении, «Тариф: Демо» до сохранения", /Тариф: Демо/.test(await page.locator("[data-testid=settings-tariff-name]").innerText()) && !(await page.locator("[data-testid=settings-tariff-save]").isDisabled()));
 
     // вкладка «Данные»: экспорт → импорт → битый файл → сброс
     await page.locator("[data-testid=settings-tab-data]").click();

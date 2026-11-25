@@ -66,6 +66,14 @@ export const SETTINGS_DEFAULTS = {
   companyAbout: "Демо-описание."
 } as const;
 
+/* ----------------------------------------------------------- Тариф (этап 7) */
+
+/** Доступные тарифы: названия без цен — цены не выдумываются (биллинг — внешний сервис). */
+export const TARIFFS: readonly string[] = ["Демо", "Базовый", "Профи"];
+
+/** Тариф по умолчанию: демо (пробный период). */
+export const DEFAULT_TARIFF = "Демо";
+
 /** Сообщение после импорта файла данных — текст тоста importJSON прототипа (db.js). */
 export function importFeedback(dropped: number): string {
   return dropped > 0

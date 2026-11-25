@@ -171,7 +171,13 @@ export const supplyOfferSchema = z.object({ supplier: text(300), price: z.number
 /** Интеграция раздела «Интеграции» (data.js INTEGRATIONS): справочник карточек со статусом подключения. */
 export const integrationSchema = z.object({ id, name: text(100), desc: text(300), connected: z.boolean(), icon: text(60) });
 
-export const companyProfileSchema = z.object({ name: text(300), about: text(2000), audience: text(2000) });
+export const companyProfileSchema = z.object({
+  name: text(300),
+  about: text(2000),
+  audience: text(2000),
+  /** Выбранный тариф (этап 7); названия без цен — биллинг внешний, в демо не подключён. */
+  tariff: optText
+});
 
 export type KnowledgeSource = z.infer<typeof knowledgeSourceSchema>;
 export type ChainNode = z.infer<typeof chainNodeSchema>;

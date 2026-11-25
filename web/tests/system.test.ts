@@ -4,12 +4,14 @@ import { INTEGRATIONS } from "@/lib/mock-data/reference";
 import { SEED_DATA } from "@/lib/mock-data/seed";
 import {
   DEFAULT_SETTINGS_TAB,
+  DEFAULT_TARIFF,
   HELP_INITIAL,
   HELP_WHO,
   NOTIFICATION_TOGGLES,
   ROLE_ACCESS,
   SETTINGS_DEFAULTS,
   SETTINGS_TABS,
+  TARIFFS,
   importFeedback,
   integrationStatusText
 } from "@/lib/selectors/system";
@@ -108,5 +110,22 @@ describe("сообщения вкладки «Данные» и чата обу�
     expect(HELP_INITIAL).toContain("настроить AI-сотрудника");
     expect(HELP_INITIAL).not.toContain("ИИ-");
     expect(HELP_WHO).toBe("Помощь");
+  });
+});
+
+describe("тариф (этап 7)", () => {
+  it("доступные тарифы: три названия без цен, по умолчанию «Демо»", () => {
+    expect(TARIFFS).toEqual(["Демо", "Базовый", "Профи"]);
+    expect(DEFAULT_TARIFF).toBe("Демо");
+  });
+  it("профиль хранит выбранный тариф (PATCH company-profile сохраняет tariff)", async () => {
+    const api = createLocalApi({ storage: createMemoryStorage() });
+    const saved = await api.companyProfile.update({ tariff: "Базовый" });
+    expect(saved.tariff).toBe("Базовый");
+    expect(await api.companyProfile.get()).toEqual({ ...saved, tariff: "Базовый" });
+  });
+  it("слишком длинное название тарифа отклоняется схемой профиля", async () => {
+    const api = createLocalApi({ storage: createMemoryStorage() });
+    await expect(api.companyProfile.update({ tariff: "x".repeat(2001) })).rejects.toMatchObject({ code: "validation" });
   });
 });
