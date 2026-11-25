@@ -1,6 +1,8 @@
 /* dialogs.check.mjs — браузерные проверки раздела «Диалоги» (этап 3, группа 2): список входящих,
    переписка с чипом режима (ИИ отвечает / Менеджер отвечает / ИИ в режиме чтения), передача диалога
    «Передать менеджеру» / «Вернуть ИИ», отправка сообщения менеджером (переход в режим чтения),
+   вложения в диалоге (этап 6): выбор файла, чипы, лимиты 1 МБ и 3 файла, скачивание data-URL,
+   сохранение на сервере и после перезагрузки, отправка без текста, превью «📎 имя»,
    панель контекста, мобильный режим список↔переписка, переименование «ИИ-» → «AI-»,
    состояния loading/empty/error/success, overflow, контраст, консоль.
    Запуск: npm run build && node e2e/dialogs.check.mjs */
@@ -89,6 +91,47 @@ async function main() {
     await page.waitForFunction((n) => document.querySelectorAll("[data-testid=chat-msg]").length === n + 1, saved);
     await waitFor(async () => (await storageConvos()).find((c) => c.id === "cv-1")?.messages?.length === saved + 1);
     check("Enter отправляет сообщение", (await msgs.last().innerText()).includes("Сообщение через Enter"));
+
+    // ---------- вложения в диалоге (этап 6)
+    await reset(); await open();
+    await page.locator("[data-testid=chat-takeover]").click();
+    await page.waitForFunction(() => document.querySelector("[data-testid=chat-mode]")?.textContent?.trim() === "Менеджер отвечает");
+    const fileInput = page.locator("[data-testid=chat-file-input]");
+    check("скрепка: доступна в режиме менеджера, скрытое поле файла в DOM", !(await page.locator("[data-testid=chat-attach]").isDisabled()) && (await fileInput.count()) === 1);
+    const tiny = { name: "бриф.txt", mimeType: "text/plain", buffer: Buffer.from("Краткое ТЗ по проекту, 2 страницы") };
+    await fileInput.setInputFiles([tiny]);
+    await page.waitForSelector("[data-testid=chat-file-chip]");
+    check("выбранный файл: чип с именем и размером, есть «Убрать»", /бриф\.txt/.test(await page.locator("[data-testid=chat-file-chip]").innerText()) && /\d+ Б/.test(await page.locator("[data-testid=chat-file-chip]").innerText()) && (await page.locator("[data-testid=chat-file-remove]").count()) === 1);
+    await page.locator("[data-testid=chat-file-remove]").click();
+    check("файл убран: чип исчез", (await page.locator("[data-testid=chat-file-chip]").count()) === 0);
+    await fileInput.setInputFiles([tiny]);
+    await page.waitForSelector("[data-testid=chat-file-chip]");
+    const attachBefore = await msgs.count();
+    await input.fill("Отправляю бриф вложением");
+    await page.locator("[data-testid=chat-send]").click();
+    await page.waitForFunction((n) => document.querySelectorAll("[data-testid=chat-msg]").length === n + 1, attachBefore);
+    const savedConv = async () => (await storageConvos()).find((c) => c.id === "cv-1");
+    await waitFor(async () => (await savedConv())?.messages?.length === attachBefore + 1);
+    const attachMsg = msgs.last();
+    check("сообщение с вложением: чип в пузыре с именем и размером", /бриф\.txt/.test(await attachMsg.innerText()) && /\d+ Б/.test(await attachMsg.innerText()));
+    check("сервер: сообщение сохранено с вложением (name/size/data)", (await savedConv())?.messages?.at(-1)?.attachments?.[0]?.name === "бриф.txt");
+    const attachLink = attachMsg.locator("[data-testid=chat-attachment]");
+    check("вложение скачивается: data-URL + download с именем файла", (await attachLink.getAttribute("href"))?.startsWith("data:text/plain;base64,") === true && (await attachLink.getAttribute("download")) === "бриф.txt");
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForSelector("[data-testid=chat-msg]");
+    check("перезагрузка: вложение сохранено и снова скачивается", (await page.locator('[data-testid=chat-attachment][data-name="бриф.txt"]').count()) === 1);
+    // ограничения лимитов: в «ИИ в режиме чтения» композер активен — менеджер может вкладывать файлы
+    await fileInput.setInputFiles([{ name: "big.bin", mimeType: "application/octet-stream", buffer: Buffer.alloc(1048577, 1) }]);
+    check("файл больше 1 МБ: ошибка role=alert, вложение не добавлено", (await page.locator("[data-testid=chat-file-error]").innerText()).includes("больше 1 МБ") && (await page.locator("[data-testid=chat-file-chip]").count()) === 0);
+    await fileInput.setInputFiles([1, 2, 3, 4].map((i) => ({ name: `f${i}.txt`, mimeType: "text/plain", buffer: Buffer.from("x") })));
+    check("больше 3 файлов: ошибка, ничего не добавлено", (await page.locator("[data-testid=chat-file-error]").innerText()).includes("Не больше 3") && (await page.locator("[data-testid=chat-file-chip]").count()) === 0);
+    await fileInput.setInputFiles([{ name: "только-файл.txt", mimeType: "text/plain", buffer: Buffer.from("без текста") }]);
+    await page.waitForSelector("[data-testid=chat-file-chip]");
+    await page.locator("[data-testid=chat-send]").click();
+    await page.waitForFunction((n) => document.querySelectorAll("[data-testid=chat-msg]").length === n + 2, attachBefore);
+    await waitFor(async () => /📎 только-файл\.txt/.test(await items.first().innerText()));
+    check("сообщение без текста, но с вложением: отправляется, превью в списке — «📎 имя»", /📎 только-файл\.txt/.test(await items.first().innerText()));
+
     await items.nth(1).click();
     await page.waitForFunction(() => document.querySelector("[data-testid=chat-thread]")?.getAttribute("data-conv-id") === "cv-2");
     check("второй диалог: «Демо-клиент Е», сразу «Менеджер отвечает», 3 сообщения", /Демо-клиент Е/.test(await page.locator("[data-testid=chat-thread]").innerText()) && (await chipText()) === "Менеджер отвечает" && (await msgs.count()) === 3);

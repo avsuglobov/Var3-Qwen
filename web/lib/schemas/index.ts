@@ -47,7 +47,28 @@ export const leadSchema = z.object({
   events: z.array(leadEventSchema)
 });
 
-export const messageSchema = z.object({ from: z.enum(["client", "ai", "human"]), text: text(10000), time: optText });
+/* ---------------------------------------------------------------- вложения диалогов (этап 6) */
+/** Лимиты: не больше трёх файлов на сообщение, каждый — до 1 МБ (содержимое хранится в снимке в base64). */
+export const MAX_MESSAGE_ATTACHMENTS = 3;
+export const MAX_ATTACHMENT_BYTES = 1_048_576;
+/** Граница поля data в снимке: base64 раздувает файл на ~⅓ (1 МБ → ~1,37 млн знаков) — с запасом до 1,5 млн. */
+export const MAX_ATTACHMENT_DATA = 1_500_000;
+
+export const attachmentSchema = z.object({
+  /** Имя файла не бывает пустым (используется как имя при скачивании) — в отличие от текстовых полей. */
+  name: z.string().min(1).max(300),
+  size: z.number().int().min(1).max(MAX_ATTACHMENT_BYTES),
+  mime: optText,
+  /** Содержимое файла в base64; в демо-сидах вложений нет — поле необязательное. */
+  data: z.string().max(MAX_ATTACHMENT_DATA).optional()
+});
+
+export const messageSchema = z.object({
+  from: z.enum(["client", "ai", "human"]),
+  text: text(10000),
+  time: optText,
+  attachments: z.array(attachmentSchema).max(MAX_MESSAGE_ATTACHMENTS).nullish()
+});
 
 export const conversationSchema = z.object({
   id,
@@ -160,6 +181,7 @@ export type Funnel = z.infer<typeof funnelSchema>;
 export type ActivityPoint = z.infer<typeof activityPointSchema>;
 export type LeadEvent = z.infer<typeof leadEventSchema>;
 export type Lead = z.infer<typeof leadSchema>;
+export type Attachment = z.infer<typeof attachmentSchema>;
 export type Message = z.infer<typeof messageSchema>;
 export type Conversation = z.infer<typeof conversationSchema>;
 export type Document = z.infer<typeof documentSchema>;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SEED_DATA } from "@/lib/mock-data/seed";
-import { ACTOR_META, MODE_META, addMessagePatch, contextStatus, nowHM } from "@/lib/selectors/dialogs";
+import { ACTOR_META, MODE_META, addMessagePatch, contextStatus, fmtBytes, messagePreview, nowHM } from "@/lib/selectors/dialogs";
 
 describe("селекторы «Диалогов»: режимы и авторы", () => {
   it("режимы: подписи соответствуют прототипу (секции.js chips)", () => {
@@ -67,5 +67,34 @@ describe("демо-данные «Диалогов»", () => {
       expect(c.context.history, c.id).not.toBe("");
       expect(c.context.nextStep, c.id).not.toBe("");
     }
+  });
+});
+
+describe("вложения в диалоге (этап 6)", () => {
+  const conv = SEED_DATA.CONVERSATIONS[0];
+  const att = { name: "бриф.txt", size: 33, mime: "text/plain", data: "0KLg" };
+  it("fmtBytes: байты, целые и дробные КБ, МБ без хвостового нуля", () => {
+    expect(fmtBytes(512)).toBe("512 Б");
+    expect(fmtBytes(2048)).toBe("2 КБ");
+    expect(fmtBytes(1536)).toBe("1,5 КБ");
+    expect(fmtBytes(1024 * 1024)).toBe("1 МБ");
+    expect(fmtBytes(1572864)).toBe("1,5 МБ");
+  });
+  it("превью сообщения с текстом — текст", () => {
+    expect(messagePreview({ from: "human", text: "Привет", time: "12:00" })).toBe("Привет");
+  });
+  it("превью сообщения без текста, но с вложениями — «📎 имена»; пустое — пустая строка", () => {
+    expect(messagePreview({ from: "human", text: "", attachments: [att, { ...att, name: "смета.pdf" }] })).toBe("📎 бриф.txt, смета.pdf");
+    expect(messagePreview({ from: "human", text: "" })).toBe("");
+  });
+  it("addMessagePatch: вложения уходят в сообщение; превью без текста — «📎 имена»", () => {
+    const patch = addMessagePatch(conv, { from: "human", text: "", time: "12:00", attachments: [att] }, "reading");
+    expect(patch.messages?.at(-1)?.attachments).toEqual([att]);
+    expect(patch.lastPreview).toBe("📎 бриф.txt");
+    expect(patch.mode).toBe("reading");
+  });
+  it("addMessagePatch: у текстового сообщения превью-поведение прежнее", () => {
+    const patch = addMessagePatch(conv, { from: "human", text: "Проверка отправки", time: "12:01" });
+    expect(patch.lastPreview).toBe("Проверка отправки");
   });
 });
