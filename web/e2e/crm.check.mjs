@@ -2,7 +2,8 @@
    лида, смена стадии списком, канбан (колонки, счётчики, КРИТИЧНО, dnd-kit перетаскивание мышью,
    клик по карточке), таблица (фильтр по стадиям, сортировка ID → Имя → Активность, клик по строке),
    создание и удаление лида с подтверждением, deep-link ?lead=, «Открыть диалог», «Документ» открывает модалку с клиентом из лида,
-   переименование «ИИ-» → «AI-», overflow 375…1920 × 2 темы, контраст, консоль.
+   переименование «ИИ-» → «AI-», бейдж синхронизации из справочника интеграций (этап 6: amoCRM и
+   Bitrix24, скрыт при загрузке), overflow 375…1920 × 2 темы, контраст, консоль.
    Запуск: npm run build && node e2e/crm.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
 import { apiItems, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
@@ -51,7 +52,7 @@ async function main() {
     await reset(); await setFaults({ latencyMs: 1500 });
     await page.goto(BASE + "/crm", { waitUntil: "domcontentloaded" });
     await page.waitForSelector("[aria-busy=true]");
-    check("loading: показаны скелетоны, данных ещё нет", (await page.locator("[aria-busy=true]").count()) >= 1 && (await page.locator("[data-testid=crm-journal-card]").count()) === 0);
+    check("loading: показаны скелетоны, данных ещё нет (бейдж синхронизации скрыт)", (await page.locator("[aria-busy=true]").count()) >= 1 && (await page.locator("[data-testid=crm-journal-card]").count()) === 0 && (await page.locator("[data-testid=crm-sync]").count()) === 0);
     await page.waitForSelector("[data-testid=crm-journal-card]", { timeout: 8000 });
     await waitFor(async () => (await page.locator("[aria-busy=true]").count()) === 0, { timeout: 10000 });
     check("loading → success: скелетоны исчезли, журнал с событиями", (await page.locator("[aria-busy=true]").count()) === 0 && (await page.locator("[data-testid=crm-journal-row]").count()) > 0);
@@ -63,7 +64,8 @@ async function main() {
     check("инспектор по умолчанию: первый лид воронки LD-1042 «Демо-клиент А», стадия «Новые»", (await page.locator("[data-testid=crm-inspector]").innerText()).includes("Демо-клиент А") && /LD-1042/.test(await page.locator("[data-testid=crm-inspector-kv]").innerText()) && (await page.locator("[data-testid=crm-inspector-stage]").innerText()).includes("Новые"));
     const rowsTotal = await page.locator("[data-testid=crm-journal-row]").count();
     check(`журнал fn-sales: ${rowsTotal} событий, есть и ИИ, и Менеджер`, rowsTotal >= 6 && (await page.locator("[data-testid=crm-journal-row][data-actor=ai]").count()) > 0 && (await page.locator("[data-testid=crm-journal-row][data-actor=human]").count()) > 0);
-    check("бейдж синхронизации в шапке", /Синхр\. amoCRM: ОК/.test(await page.locator("[data-testid=crm-sync]").innerText()));
+    const syncText = await page.locator("[data-testid=crm-sync]").innerText();
+    check("бейдж синхронизации: статусы из справочника интеграций (amoCRM ОК, Bitrix24 ОК)", /Синхр\. amoCRM: ОК · Bitrix24: ОК/.test(syncText));
 
     // ---------- смена стадии списком в инспекторе
     await page.locator("[data-testid=crm-lead-stage-select]").selectOption("work");

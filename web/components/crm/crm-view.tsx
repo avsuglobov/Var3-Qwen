@@ -12,10 +12,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/state";
-import { useAgents, useChannels, useConversations, useCreateLead, useDeleteLead, useDocuments, useFunnels, useLeads, useMoveLeadStage, useStages } from "@/lib/api/hooks";
+import { useAgents, useChannels, useConversations, useCreateLead, useDeleteLead, useDocuments, useFunnels, useIntegrations, useLeads, useMoveLeadStage, useStages } from "@/lib/api/hooks";
 import type { Lead } from "@/lib/schemas";
 import {
   VIEW_META,
+  crmSyncLabel,
+  crmSyncOk,
+  crmSyncRows,
   filterByStage,
   funnelLeads,
   funnelStages,
@@ -41,6 +44,7 @@ export function CrmView() {
   const agentsQ = useAgents();
   const conversationsQ = useConversations();
   const documentsQ = useDocuments();
+  const integrationsQ = useIntegrations();
   const moveStage = useMoveLeadStage();
   const createLead = useCreateLead();
   const removeLead = useDeleteLead();
@@ -67,9 +71,9 @@ export function CrmView() {
     if (leadParam) setSelectedLeadId(leadParam);
   }, []);
 
-  const loading = leadsQ.isPending || funnelsQ.isPending || stagesQ.isPending || channelsQ.isPending || agentsQ.isPending;
-  const error = leadsQ.isError || funnelsQ.isError || stagesQ.isError || channelsQ.isError || agentsQ.isError
-    ? leadsQ.error ?? funnelsQ.error ?? stagesQ.error ?? channelsQ.error ?? agentsQ.error
+  const loading = leadsQ.isPending || funnelsQ.isPending || stagesQ.isPending || channelsQ.isPending || agentsQ.isPending || integrationsQ.isPending;
+  const error = leadsQ.isError || funnelsQ.isError || stagesQ.isError || channelsQ.isError || agentsQ.isError || integrationsQ.isError
+    ? leadsQ.error ?? funnelsQ.error ?? stagesQ.error ?? channelsQ.error ?? agentsQ.error ?? integrationsQ.error
     : null;
   const leads = leadsQ.data ?? [];
   const funnels = funnelsQ.data ?? [];
@@ -89,7 +93,7 @@ export function CrmView() {
   if (loading) {
     return (
       <div className="min-w-0 space-y-6">
-        <Header view={view} funnelId={activeFunnelId} funnels={funnels} onFunnelChange={() => undefined} onViewChange={() => undefined} onCreate={() => undefined} />
+        <Header view={view} funnelId={activeFunnelId} funnels={funnels} syncLabel={null} syncOk={false} onFunnelChange={() => undefined} onViewChange={() => undefined} onCreate={() => undefined} />
         <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[1.4fr_1fr]" aria-busy="true" aria-label="Загрузка CRM">
           <Skeleton className="h-80" />
           <Skeleton className="h-80" />
@@ -100,10 +104,10 @@ export function CrmView() {
   if (error) {
     return (
       <div className="min-w-0 space-y-6">
-        <Header view={view} funnelId={activeFunnelId} funnels={funnels} onFunnelChange={() => undefined} onViewChange={() => undefined} onCreate={() => undefined} />
+        <Header view={view} funnelId={activeFunnelId} funnels={funnels} syncLabel={null} syncOk={false} onFunnelChange={() => undefined} onViewChange={() => undefined} onCreate={() => undefined} />
         <ErrorState
           message={error.message}
-          onRetry={() => { void leadsQ.refetch(); void funnelsQ.refetch(); void stagesQ.refetch(); void channelsQ.refetch(); void agentsQ.refetch(); }}
+          onRetry={() => { void leadsQ.refetch(); void funnelsQ.refetch(); void stagesQ.refetch(); void channelsQ.refetch(); void agentsQ.refetch(); void integrationsQ.refetch(); }}
         />
       </div>
     );
@@ -115,6 +119,8 @@ export function CrmView() {
         view={view}
         funnelId={activeFunnelId}
         funnels={funnels}
+        syncLabel={crmSyncLabel(crmSyncRows(integrationsQ.data ?? []))}
+        syncOk={crmSyncOk(crmSyncRows(integrationsQ.data ?? []))}
         onFunnelChange={(id) => setFunnelId(id)}
         onViewChange={setView}
         onCreate={() => setCreateOpen(true)}
@@ -232,11 +238,13 @@ export function CrmView() {
   );
 }
 
-/** Шапка раздела: заголовок, «Создать лид», переключатель видов, воронка, статус синхронизации. */
+/** Шапка раздела: заголовок, «Создать лид», переключатель видов, воронка, статус синхронизации с внешними CRM (этап 6: из справочника интеграций). */
 function Header({
   view,
   funnelId,
   funnels,
+  syncLabel,
+  syncOk,
   onFunnelChange,
   onViewChange,
   onCreate
@@ -244,6 +252,9 @@ function Header({
   view: CrmView;
   funnelId: string;
   funnels: readonly { id: string; name: string }[];
+  /** Текст статуса синхронизации; null — данные справочника ещё не загружены (бейдж не рисуется). */
+  syncLabel: string | null;
+  syncOk: boolean;
   onFunnelChange: (id: string) => void;
   onViewChange: (v: CrmView) => void;
   onCreate: () => void;
@@ -289,10 +300,16 @@ function Header({
             </option>
           ))}
         </select>
-        <Badge variant="outline" data-testid="crm-sync">
-          <span className="size-1.5 rounded-full bg-status" aria-hidden />
-          Синхр. amoCRM: ОК
-        </Badge>
+        {syncLabel !== null ? (
+          <Badge
+            variant="outline"
+            data-testid="crm-sync"
+            title="Статусы внешних CRM — из справочника интеграций; настроить подключения можно в разделе «Интеграции»"
+          >
+            <span className={cn("size-1.5 rounded-full", syncOk ? "bg-status" : "bg-critical")} aria-hidden />
+            {syncLabel}
+          </Badge>
+        ) : null}
       </div>
     </header>
   );
