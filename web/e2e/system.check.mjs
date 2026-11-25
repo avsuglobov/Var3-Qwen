@@ -111,6 +111,7 @@ async function main() {
     check("синхронизация (webhook POST): «Синхронизация · успех»", /Синхронизация · успех/.test(await page.locator("[data-testid=integrations-run][data-int=int-api]").innerText()));
     await page.locator("[data-testid=integrations-keys][data-int=int-amocrm]").click();
     await page.waitForSelector("[data-testid=integrations-keys-dialog]");
+    check("этап 10: в диалоге amoCRM OAuth-поля — clientId открытым, clientSecret/refreshToken секретными, токен необязателен", (await page.locator("[data-testid=integrations-key-input][data-field=clientId]").count()) === 1 && (await page.locator("[data-testid=integrations-key-input][data-field=clientSecret]").getAttribute("type")) === "password" && (await page.locator("[data-testid=integrations-key-input][data-field=refreshToken]").getAttribute("type")) === "password" && (await page.locator("[data-testid=integrations-key-input][data-field=accessToken]").getAttribute("type")) === "password");
     await page.locator("[data-testid=integrations-key-input][data-field=subdomain]").fill("demo-company");
     await page.locator("[data-testid=integrations-key-input][data-field=accessToken]").fill("amo-token-1234567890");
     await page.locator("[data-testid=integrations-keys-save]").click();
