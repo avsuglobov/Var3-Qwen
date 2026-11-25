@@ -1,13 +1,16 @@
 "use client";
 
-import { Calendar, Code, FileText, MessageCircle, Phone, Plug, Plus, RefreshCw, Send } from "lucide-react";
+import { Calendar, Code, FileText, KeyRound, MessageCircle, Phone, Plug, Plus, RefreshCw, Send } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/state";
-import { useCompanyProfile, useIntegrations, useSaveCompanyProfile } from "@/lib/api/hooks";
+import { useCompanyProfile, useIntegrationAction, useIntegrationRuns, useIntegrations, useSaveCompanyProfile } from "@/lib/api/hooks";
+import { CredentialsDialog } from "@/components/system/credentials-dialog";
+import { adapterOf } from "@/lib/integrations/adapters";
+import type { IntegrationRun } from "@/lib/integrations/types";
 import { applyConnectionStates, integrationStatusText } from "@/lib/selectors/system";
 import { cn } from "@/lib/utils";
 import type { Integration } from "@/lib/schemas";
@@ -25,15 +28,31 @@ const INTEGRATION_ICON: Record<string, typeof FileText> = {
 /**
  * Раздел «Интеграции» (этап 3, финальная группа) — поведение integrations() прототипа:
  * сетка карточек D.INTEGRATIONS со статусом «Подключено / Не подключено» и кнопка
- * «Запросить интеграцию» (обратная связь вместо тоста прототипа). Этап 7: «Подключить»/
- * «Отключить» сохраняют состояние в профиле компании (connections) и переживают
- * перезагрузку; вызовы внешних сервисов в демо не выполняются — помечено честно.
+ * «Запросить интеграцию». Этап 7: «Подключить»/«Отключить» сохраняют состояние в профиле
+ * компании (connections) и переживают перезагрузку. Этап 8: у интеграций с адаптерами
+ * (amoCRM, Bitrix24, REST API/webhook) кнопки «Ключи», «Проверить связь» и
+ * «Синхронизировать» выполняют реальные HTTP-запросы через сервер, журнал прогонов —
+ * в .data/integration-runs.json; у остальных карточек адаптер появится позже.
  */
 export function IntegrationsView() {
   const integrationsQ = useIntegrations();
   const profileQ = useCompanyProfile();
   const save = useSaveCompanyProfile();
+  const runsQ = useIntegrationRuns();
+  const actionM = useIntegrationAction();
   const [feedback, setFeedback] = useState("");
+  const [keysFor, setKeysFor] = useState<Integration | null>(null);
+
+  /** Действие адаптера: реальный вызов на сервере; итог связи ok:false — тоже результат. */
+  const runAction = (id: string, action: "check" | "sync"): void => {
+    actionM.mutate(
+      { integrationId: id, action },
+      {
+        onSuccess: ({ run }) => setFeedback(`${nameOf(integrationsQ.data ?? [], id)}: ${action === "check" ? "проверка связи" : "синхронизация"} — ${run.ok ? "успех" : "ошибка"} (${run.detail})`),
+        onError: (e) => setFeedback(e.message)
+      }
+    );
+  };
 
   if (integrationsQ.isPending || profileQ.isPending) {
     return (
@@ -60,6 +79,7 @@ export function IntegrationsView() {
 
   const items = integrationsQ.data ?? [];
   const effective = applyConnectionStates(items, profileQ.data?.connections);
+  const runs = runsQ.data?.runs ?? [];
 
   /** Переключение состояния: в профиль сохраняются явные состояния всех интеграций справочника. */
   const toggle = (id: string, next: boolean): void => {
@@ -85,13 +105,24 @@ export function IntegrationsView() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="integrations-grid">
         {effective.map((it) => (
-          <IntegrationCard key={it.id} item={it} onToggle={toggle} />
+          <IntegrationCard
+            key={it.id}
+            item={it}
+            run={runs.find((r) => r.integrationId === it.id) ?? null}
+            onToggle={toggle}
+            onKeys={() => setKeysFor(it)}
+            onAction={runAction}
+            actionBusy={actionM.isPending && actionM.variables?.integrationId === it.id}
+          />
         ))}
       </div>
 
+      <CredentialsDialog key={keysFor?.id ?? "none"} open={keysFor !== null} integration={keysFor ?? effective[0]} onOpenChange={(next) => (next ? null : setKeysFor(null))} onSaved={(name) => setFeedback(`${name}: ключи сохранены`)} />
+
       <p className="inline-flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
         <Plug className="size-3.5" aria-hidden />
-        Состояние подключения сохраняется в данных приложения; обмен данными с внешними сервисами в демо не выполняется.
+        Состояние подключения сохраняется в данных приложения. «Проверить связь» и «Синхронизировать» выполняют реальные
+        HTTP-запросы через сервер; ключи вводятся вручную («Ключи») и хранятся в .data/secrets.json — в браузер отдаётся только маска.
       </p>
     </div>
   );
@@ -101,9 +132,37 @@ function nameOf(items: readonly Integration[], id: string): string {
   return items.find((it) => it.id === id)?.name ?? id;
 }
 
-function IntegrationCard({ item, onToggle }: { item: Integration; onToggle: (id: string, next: boolean) => void }) {
+/** Строка последнего прогона: статус не только цветом (точка + слово «успех»/«ошибка»). */
+function RunLine({ run }: { run: IntegrationRun }) {
+  const time = new Date(run.at).toLocaleTimeString("ru-RU", { hour12: false });
+  return (
+    <p className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground" data-testid="integrations-run" data-int={run.integrationId}>
+      <span className={cn("size-1.5 shrink-0 rounded-full", run.ok ? "bg-status" : "bg-critical")} aria-hidden />
+      <span className="min-w-0 truncate">
+        {run.action === "check" ? "Проверка" : "Синхронизация"} · {run.ok ? "успех" : "ошибка"} · {run.detail} · {time}
+      </span>
+    </p>
+  );
+}
+
+function IntegrationCard({
+  item,
+  run,
+  onToggle,
+  onKeys,
+  onAction,
+  actionBusy
+}: {
+  item: Integration;
+  run: IntegrationRun | null;
+  onToggle: (id: string, next: boolean) => void;
+  onKeys: () => void;
+  onAction: (id: string, action: "check" | "sync") => void;
+  actionBusy: boolean;
+}) {
   const Icon = INTEGRATION_ICON[item.icon] ?? Plug;
   const connected = item.connected;
+  const adapter = adapterOf(item.id);
   return (
     <Card className="h-full" data-testid="integrations-card" data-int={item.id}>
       <CardContent className="flex h-full flex-col gap-2.5">
@@ -116,6 +175,25 @@ function IntegrationCard({ item, onToggle }: { item: Integration; onToggle: (id:
           </Badge>
         </div>
         <p className="text-xs text-muted-foreground">{item.desc}</p>
+        {adapter ? (
+          <div className="space-y-1.5">
+            <div className="flex min-w-0 flex-wrap gap-1.5">
+              <Button variant="secondary" size="sm" data-testid="integrations-keys" data-int={item.id} onClick={onKeys}>
+                <KeyRound className="size-3.5" aria-hidden />
+                Ключи
+              </Button>
+              <Button variant="secondary" size="sm" data-testid="integrations-check" data-int={item.id} disabled={actionBusy} onClick={() => onAction(item.id, "check")}>
+                Проверить связь
+              </Button>
+              <Button variant="secondary" size="sm" data-testid="integrations-sync" data-int={item.id} disabled={actionBusy} onClick={() => onAction(item.id, "sync")}>
+                Синхронизировать
+              </Button>
+            </div>
+            {run ? <RunLine run={run} /> : <p className="text-[11px] text-muted-foreground">Прогонов ещё не было</p>}
+          </div>
+        ) : (
+          <p className="text-[11px] text-muted-foreground">Адаптер появится позже</p>
+        )}
         <div className="mt-auto flex min-w-0 items-center justify-between gap-2 pt-1">
           <Badge variant="outline" className="text-[11px]">
             <span className={cn("size-1.5 rounded-full", connected ? "bg-status" : "bg-muted-foreground")} aria-hidden />

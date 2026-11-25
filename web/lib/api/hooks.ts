@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getApi } from "@/lib/api";
+import type { IntegrationRun } from "@/lib/integrations/types";
 import type { Agent, CompanyProfile, Conversation, Course, Document, Lead, OnboardingStep, Task } from "@/lib/schemas";
 
 /** Ключи запросов. Все данные приходят через интерфейс Api (localStorage сейчас, REST потом). */
@@ -26,7 +27,8 @@ export const qk = {
   quizzes: ["quizzes"] as const,
   companyProfile: ["companyProfile"] as const,
   courses: ["courses"] as const,
-  certificates: ["certificates"] as const
+  certificates: ["certificates"] as const,
+  integrationRuns: ["integrationRuns"] as const
 };
 
 export const useLeads = () => useQuery({ queryKey: qk.leads, queryFn: () => getApi().leads.list() });
@@ -311,5 +313,66 @@ export function useResetData() {
   return useMutation({
     mutationFn: () => getApi().data.reset(),
     onSettled: () => qc.invalidateQueries()
+  });
+}
+
+/* ------------------------------------------------------------ Интеграции (этап 8) */
+
+/**
+ * Внешние интеграции ходят не через интерфейс Api, а напрямую в серверные маршруты
+ * /api/integrations/*: ключи живут только на сервере (.data/secrets.json), в браузер
+ * отдаётся маска, поэтому localStorage-адаптеру здесь делать нечего.
+ */
+
+/** Строка GET /api/integrations/credentials: секрет отдаётся маской, несекретное поле — текстом. */
+export interface MaskedCredentials {
+  integrationId: string;
+  updatedAt: number | null;
+  fields: { key: string; label: string; secret: boolean; hint: string | null; masked: string | null; plain: string | null }[];
+}
+
+/** JSON-запрос с разворачиванием {message} ошибки в Error (как ApiError в rest-адаптере). */
+async function integrationFetch<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, { headers: { "content-type": "application/json" }, ...init });
+  const body: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = (body as { message?: string } | null)?.message;
+    throw new Error(message ?? `Запрос к ${url} не удался (HTTP ${res.status})`);
+  }
+  return body as T;
+}
+
+/** Журнал прогонов интеграций: новые сверху (успех/ошибка, HTTP-статус, время, задержка). */
+export const useIntegrationRuns = () =>
+  useQuery({ queryKey: qk.integrationRuns, queryFn: () => integrationFetch<{ runs: IntegrationRun[] }>("/api/integrations/runs") });
+
+/** «Проверить связь» / «Синхронизировать»: реальный вызов адаптера на сервере, журнал обновляется. */
+export function useIntegrationAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ integrationId, action }: { integrationId: string; action: "check" | "sync" }) =>
+      integrationFetch<{ run: IntegrationRun }>(`/api/integrations/${action}`, { method: "POST", body: JSON.stringify({ integrationId }) }),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.integrationRuns })
+  });
+}
+
+/** Маскированные ключи интеграции; null-integrationId — запрос отключён (диалог закрыт). */
+export const useCredentials = (integrationId: string | null) =>
+  useQuery({
+    queryKey: ["credentials", integrationId],
+    queryFn: () => integrationFetch<MaskedCredentials>(`/api/integrations/credentials?integrationId=${encodeURIComponent(integrationId ?? "")}`),
+    enabled: integrationId !== null
+  });
+
+/** Сохранение ключей из диалога; маска обновляется после подтверждения сервера. */
+export function useSaveCredentials() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ integrationId, fields }: { integrationId: string; fields: Record<string, string> }) =>
+      integrationFetch<{ ok: boolean; updatedAt: number | null }>("/api/integrations/credentials", {
+        method: "PUT",
+        body: JSON.stringify({ integrationId, fields })
+      }),
+    onSettled: (_d, _e, vars) => qc.invalidateQueries({ queryKey: ["credentials", vars.integrationId] })
   });
 }
