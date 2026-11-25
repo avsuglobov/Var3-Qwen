@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { QUIZ_PASS, QUIZZES } from "@/lib/mock-data/reference";
-import { buildCourse, courseAction, nextCourseId, pctOf, quizResultTitle, quizScore } from "@/lib/selectors/training";
+import { buildCourse, buildTestCourse, courseAction, materialQuiz, nextCourseId, pctOf, quizResultTitle, quizScore } from "@/lib/selectors/training";
 import type { Course } from "@/lib/schemas";
 
 /* Селекторы «Обучения» — инварианты теста прототипа (scripts/regress_learn.js):
@@ -111,5 +111,53 @@ describe("создание курсов (этап 6)", () => {
   });
   it("курс пользователя с тестом доступен для «Пройти тест» (courseAction)", () => {
     expect(courseAction(0, true)).toBe("quiz");
+  });
+});
+
+describe("тест из материала хранилища (этап 7)", () => {
+  const st = [
+    "Продукт поставляется в трёх комплектациях",
+    "Возврат оформляется в течение 14 дней",
+    "Скидка предоставляется от объёма свыше 100 шт.",
+    "Гарантия на комплектующие — 24 месяца"
+  ];
+  const courses: Course[] = [{ id: "crs-1", title: "Демо", lessons: 3, progress: 0, status: "Не начат" }];
+  it("materialQuiz: 4 вопроса, в каждом все тезисы вариантами, верные ответы смещаются 0,3,2,1", () => {
+    const qs = materialQuiz("Материал.pdf", st);
+    expect(qs.length).toBe(4);
+    expect(qs.map((q) => q.answer).join(",")).toBe("0,3,2,1");
+    expect(qs.every((q) => q.q === "Какое утверждение соответствует материалу «Материал.pdf»?")).toBe(true);
+    for (let i = 0; i < 4; i++) {
+      expect(qs[i].options).toHaveLength(4);
+      expect(qs[i].options[qs[i].answer]).toBe(st[i]);
+      expect(new Set(qs[i].options).size).toBe(4);
+    }
+  });
+  it("materialQuiz: детерминирован и работает при n > 4 (каждый вопрос — окно из 4 тезисов)", () => {
+    const five = [...st, "Доставка по России — от 2 дней"];
+    const qs = materialQuiz("М", five);
+    expect(qs.length).toBe(5);
+    qs.forEach((q, i) => expect(q.options[q.answer]).toBe(five[i]));
+    expect(JSON.stringify(materialQuiz("М", five))).toBe(JSON.stringify(qs));
+  });
+  it("buildTestCourse: ошибки — нет названия, длинное название, мало тезисов, длинный тезис", () => {
+    expect(buildTestCourse({ sourceId: "ks-1", sourceName: "  ", statements: st }, courses)).toEqual({ error: "Укажите название источника" });
+    expect(buildTestCourse({ sourceId: "ks-1", sourceName: "x".repeat(241), statements: st }, courses)).toEqual({ error: expect.stringContaining("240 знаков") });
+    expect(buildTestCourse({ sourceId: "ks-1", sourceName: "Источник", statements: st.slice(0, 3) }, courses)).toEqual({ error: expect.stringContaining("минимум 4") });
+    expect(buildTestCourse({ sourceId: "ks-1", sourceName: "Источник", statements: [...st, "y".repeat(301)] }, courses)).toEqual({ error: expect.stringContaining("300 символов") });
+  });
+  it("buildTestCourse: курс cr-2 с вопросами из тезисов, demo:false, sourceId; дубликаты тезисов убираются", () => {
+    const c = buildTestCourse({ sourceId: "ks-1", sourceName: " Демо-описание продукта.pdf ", statements: [...st, st[0], " "] }, courses);
+    expect("error" in c).toBe(false);
+    if ("error" in c) return;
+    expect(c.id).toBe("cr-1");
+    expect(c.title).toBe("Тест по материалу: Демо-описание продукта.pdf");
+    expect(c.lessons).toBe(1);
+    expect(c.lessonTitles).toEqual(["Материал: Демо-описание продукта.pdf"]);
+    expect(c.questions?.length).toBe(4);
+    expect(c.questions?.map((q) => q.answer).join(",")).toBe("0,3,2,1");
+    expect(c.demo).toBe(false);
+    expect(c.sourceId).toBe("ks-1");
+    expect(c.status).toBe("Не начат");
   });
 });

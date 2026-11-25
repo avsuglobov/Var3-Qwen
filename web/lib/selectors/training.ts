@@ -90,3 +90,61 @@ export function buildCourse(input: NewCourseInput, courses: readonly Course[]): 
     demo: false
   };
 }
+
+/* ------------------------------------------------------- тест из материала хранилища (этап 7) */
+
+/**
+ * Вопросы теста, собранные из тезисов материала механически, без выдуманного содержания:
+ * в каждом вопросе 4 утверждения из материала, верное — своё; порядок вариантов
+ * детерминированно сдвигается от вопроса к вопросу (ответ не всегда на одном месте).
+ */
+export function materialQuiz(sourceName: string, statements: readonly string[]): QuizQuestion[] {
+  const q = `Какое утверждение соответствует материалу «${sourceName}»?`;
+  const n = statements.length;
+  return statements.map((_, i) => {
+    const offset = i % 4;
+    const options = Array.from({ length: 4 }, (_, k) => statements[(i + ((k + offset) % 4)) % n]);
+    return { q, options, answer: (4 - offset) % 4 };
+  });
+}
+
+export interface MaterialTestInput {
+  /** Источник знаний из «Хранилища» (ks-N). */
+  sourceId: string;
+  /** Название источника — до 240 знаков, чтобы уместиться в название курса. */
+  sourceName: string;
+  /** Тезисы материала: по одному на строку. */
+  statements: string[];
+}
+
+/** Курс с тестом, собранным из тезисов материала хранилища; ошибка — строка с причиной. */
+export function buildTestCourse(input: MaterialTestInput, courses: readonly Course[]): Course | { error: string } {
+  const name = input.sourceName.trim();
+  if (!name) return { error: "Укажите название источника" };
+  if (name.length > 240) return { error: "Название источника длиннее 240 знаков — не поместится в название курса" };
+  const seen = new Set<string>();
+  const statements: string[] = [];
+  for (const raw of input.statements) {
+    const s = raw.trim();
+    if (!s || seen.has(s)) continue;
+    if (s.length > 300) return { error: "Один из тезисов длиннее 300 символов — сократите его" };
+    seen.add(s);
+    statements.push(s);
+  }
+  if (statements.length < 4) return { error: "Нужно минимум 4 уникальных тезиса — по одному на строку" };
+  const questions = materialQuiz(name, statements);
+  for (const qq of questions) {
+    if (!quizQuestionSchema.safeParse(qq).success) return { error: "Тезисы не помещаются в вопрос теста — сократите их" };
+  }
+  return {
+    id: nextCourseId(courses),
+    title: `Тест по материалу: ${name}`,
+    lessons: 1,
+    progress: 0,
+    status: "Не начат",
+    lessonTitles: [`Материал: ${name}`],
+    questions,
+    demo: false,
+    sourceId: input.sourceId
+  };
+}

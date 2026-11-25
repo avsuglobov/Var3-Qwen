@@ -147,7 +147,9 @@ export const courseSchema = z.object({
   /** Тест курса: у демо-курсов вопросы в справочнике QUIZZES, у созданных — в записи. */
   questions: z.array(quizQuestionSchema).nullish(),
   /** false — курс создан пользователем; у демо-сида поле не задано, записи демонстрационные. */
-  demo: z.boolean().nullish()
+  demo: z.boolean().nullish(),
+  /** Источник знаний, из материала которого собран тест (этап 7); у остальных курсов поле не задано. */
+  sourceId: optText
 });
 
 export const certificateSchema = z.object({

@@ -10,7 +10,7 @@
    Пустое сообщение не отправляется. Overflow 375…1920 × 2 темы, контраст AA, внешние запросы, консоль.
    Запуск: npm run build && node e2e/ops.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { apiProfile, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
+import { apiItems, apiProfile, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
 
 const { check, done } = reporter();
 
@@ -31,7 +31,7 @@ async function main() {
     const prepare = async (fn, arg) => { await origin(); await page.evaluate(fn, arg); };
     const reset = async () => { await apiReset(); await prepare(() => localStorage.clear()); };
     const open = async (url = "/storage") => {
-      const waitSel = { "/storage": "[data-testid=storage-table]", "/team": "[data-testid=team-chain]", "/supply": "[data-testid=supply-requests]", "/analytics": "[data-testid=analytics-review]" }[url];
+      const waitSel = { "/storage": "[data-testid=storage-table]", "/team": "[data-testid=team-chain]", "/supply": "[data-testid=supply-requests]", "/analytics": "[data-testid=analytics-review]", "/training": "[data-testid=training-courses]" }[url];
       for (let attempt = 0; attempt < 3; attempt++) {
         await page.goto(BASE + url, { waitUntil: "networkidle" });
         try {
@@ -71,6 +71,22 @@ async function main() {
     check("источник ks-1: «Демо-описание продукта.pdf», тип PDF, бейдж «Индексировано»", row1.includes("Демо-описание продукта.pdf") && row1.includes("PDF") && row1.includes("Индексировано"));
     const row4 = await page.locator("[data-testid=storage-row][data-source=ks-4]").innerText();
     check("источник ks-4 (web): тип «Сайт», статус «Обновляется» без точки", row4.toLowerCase().includes("сайт") && row4.includes("Обновляется") && !row4.includes("Индексировано"));
+
+    // ---------- тест из материала хранилища (этап 7)
+    await page.locator("[data-testid=storage-quiz-btn][data-source=ks-1]").click();
+    await page.waitForSelector("[data-testid=material-dialog]");
+    check("модалка: источник подставлен из строки", (await page.locator("[data-testid=material-source-name]").inputValue()) === "Демо-описание продукта.pdf");
+    await page.locator("[data-testid=material-save]").click();
+    check("тест из материала: пустые тезисы → ошибка «минимум 4» (role=alert)", (await page.locator("[data-testid=material-error]").innerText()).includes("минимум 4"));
+    const st = ["Продукт поставляется в трёх комплектациях", "Возврат оформляется в течение 14 дней", "Скидка предоставляется от объёма свыше 100 шт.", "Гарантия на комплектующие — 24 месяца"];
+    await page.locator("[data-testid=material-statements]").fill(st.join("\n"));
+    await page.locator("[data-testid=material-save]").click();
+    await page.waitForSelector("[data-testid=material-dialog]", { state: "detached", timeout: 8000 });
+    check("тест создан: «Тест создан: Тест по материалу…»", (await page.locator("[data-testid=storage-feedback]").innerText()).includes("Тест создан"));
+    const testCourse = (await apiItems("courses")).find((c) => c.sourceId === "ks-1");
+    check("сервер: курс cr-1, 4 вопроса из тезисов, ответы 0,3,2,1, demo:false", testCourse?.id === "cr-1" && testCourse?.questions?.length === 4 && testCourse?.questions?.map((q) => q.answer).join(",") === "0,3,2,1" && testCourse?.demo === false);
+    await open("/training");
+    check("обучение: 4 карточки, у теста из материала нет «Демо», есть «Пройти тест»", (await page.locator("[data-testid=training-course-title]").count()) === 4 && (await page.locator("[data-testid=training-demo-badge]").count()) === 3 && (await page.locator("[data-testid=training-quiz-btn][data-course=cr-1]").count()) === 1);
 
     // ================= Команда
     await open("/team");
