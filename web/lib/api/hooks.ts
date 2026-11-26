@@ -376,3 +376,10 @@ export function useSaveCredentials() {
     onSettled: (_d, _e, vars) => qc.invalidateQueries({ queryKey: ["credentials", vars.integrationId] })
   });
 }
+
+/** Начало входа через amoCRM (этап 11): сервер возвращает адрес страницы авторизации для window.open. */
+export function useAmocrmAuthorize() {
+  return useMutation({
+    mutationFn: () => integrationFetch<{ authorizeUrl: string }>("/api/integrations/amocrm/authorize", { method: "POST" })
+  });
+}

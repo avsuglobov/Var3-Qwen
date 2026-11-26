@@ -119,6 +119,18 @@ async function main() {
     const credAmo = await fetch(BASE + "/api/integrations/credentials?integrationId=int-amocrm").then((r) => r.json());
     check("секрет отдаётся только маской «••••7890», полного токена в ответе нет", credAmo.fields.find((f) => f.key === "accessToken").masked === "••••7890" && !JSON.stringify(credAmo).includes("amo-token-1234567890"));
     check("в браузере полного токена нет: поле пустое, маска рядом с полем", (await page.locator("[data-testid=integrations-key-input][data-field=accessToken]").inputValue()) === "" && (await page.locator("[data-testid=integrations-keys-dialog]").innerText()).includes("••••7890") && !(await page.locator("body").innerText()).includes("amo-token-1234567890"));
+    check("этап 11: кнопка «Войти через amoCRM» есть в блоке выдачи токена с подсказкой redirect URI, но отключена — clientId ещё не сохранён", (await page.locator("[data-testid=integrations-oauth-login]").count()) === 1 && (await page.locator("[data-testid=integrations-oauth-login]").isDisabled()) === true && (await page.locator("[data-testid=integrations-oauth-block]").innerText()).includes("/api/integrations/amocrm/callback"));
+    await page.locator("[data-testid=integrations-key-input][data-field=clientId]").fill("cid-e2e-11");
+    await page.locator("[data-testid=integrations-key-input][data-field=clientSecret]").fill("csecret-e2e-11");
+    await page.locator("[data-testid=integrations-keys-save]").click();
+    await page.waitForSelector("[data-testid=integrations-keys-saved]", { timeout: 8000 });
+    await page.waitForFunction(() => { const el = document.querySelector("[data-testid=integrations-oauth-login]"); return el && el.disabled === false; }, { timeout: 8000 });
+    check("этап 11: после сохранения clientId/секретного ключа кнопка входа активна", (await page.locator("[data-testid=integrations-oauth-login]").isDisabled()) === false);
+    await page.route("**/api/integrations/amocrm/authorize", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authorizeUrl: "about:blank" }) }));
+    await page.locator("[data-testid=integrations-oauth-login]").click();
+    await page.waitForSelector("[data-testid=integrations-oauth-note]", { timeout: 8000 });
+    check("этап 11: клик по кнопке стартует вход — видна пометка «Открыта страница amoCRM», окно входа получило адрес", (await page.locator("[data-testid=integrations-oauth-note]").innerText()).includes("Открыта страница amoCRM"));
+    await page.unroute("**/api/integrations/amocrm/authorize");
     await page.locator("[data-testid=integrations-keys-cancel]").click();
     await page.waitForFunction(() => !document.querySelector("[data-testid=integrations-keys-dialog]"), { timeout: 4000 });
     await page.locator("[data-testid=integrations-keys][data-int=int-api]").click();
