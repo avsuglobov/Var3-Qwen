@@ -21,6 +21,8 @@ import { getServerStore } from "@/lib/server/store";
  * Ошибка конфигурации (нет обязательных ключей) — 400 клиенту; сетевая ошибка внешнего
  * сервиса или ошибка записи — это валидный результат прогона (ok:false) в журнале и UI.
  * fetchImpl — секам для unit-тестов; в продакшене используется глобальный fetch.
+ * Этап 13: параллельные прогоны одной интеграции блокируются — ручной прогон при занятой
+ * интеграции отвечает 409 duplicate, тик авто-синхронизации занятую интеграцию пропускает.
  */
 
 /** Слаг источника для id лидов: int-amocrm → amocrm, int-demo → demo. */
@@ -33,65 +35,93 @@ function sourceLabel(integrationId: string): string {
   return INTEGRATIONS.find((it) => it.id === integrationId)?.name ?? "Демо-источник";
 }
 
+/** Этап 13: замки прогонов по интеграции; в globalThis — dev-HMR пересоздаёт модуль, замок общий. */
+const globalLocks = globalThis as unknown as { __aiwsRunLocks?: Set<string> };
+const runLocks: Set<string> = (globalLocks.__aiwsRunLocks ??= new Set());
+
+/** true — прогон этой интеграции сейчас выполняется (ручной или автоматический). */
+export function isRunInFlight(integrationId: string): boolean {
+  return runLocks.has(integrationId);
+}
+
+/** Занимает замок интеграции; false — прогон уже выполняется (пока держится, новый не стартует). */
+export function acquireRunLock(integrationId: string): boolean {
+  if (runLocks.has(integrationId)) return false;
+  runLocks.add(integrationId);
+  return true;
+}
+
+/** Освобождает замок после завершения прогона (вызывается в finally). */
+export function releaseRunLock(integrationId: string): void {
+  runLocks.delete(integrationId);
+}
+
 export async function runIntegration(integrationId: string, action: IntegrationAction, fetchImpl: typeof fetch = fetch): Promise<IntegrationRun> {
-  const adapter = adapterOf(integrationId);
-  if (!adapter) throw new ApiError("not_found", `Для интеграции ${integrationId} адаптер пока не реализован`);
-  const saved = credentialsOf(integrationId);
-  const creds = saved?.fields ?? {};
-  const missing = adapter.fields.filter((f) => (f.required ?? true) && !(creds[f.key] ?? "").trim()).map((f) => f.label);
-  if (missing.length > 0) {
-    throw new ApiError("validation", `Не заполнены ключи (${missing.join(", ")}) — нажмите «Ключи» и заполните поля`);
+  if (!acquireRunLock(integrationId)) {
+    throw new ApiError("duplicate", "Для этой интеграции уже выполняется прогон — дождитесь его завершения");
   }
-  // Этап 12: курсор инкремента — момент последнего успешного полного прогона (null — его ещё не было).
-  const cursorAt = action === "sync" ? syncCursorOf(integrationId) : null;
-  const started = Date.now();
-  let outcome: IntegrationRunOutcome | SyncResult;
   try {
-    outcome = action === "check" ? await adapter.check(creds, fetchImpl) : await adapter.sync(creds, fetchImpl, cursorAt ?? undefined);
-    // Этап 10: адаптер мог обновить OAuth-токены — сохраняем новые ключи рядом с остальными.
-    if (outcome.ok && outcome.rotate) {
-      saveCredentials(integrationId, { ...creds, ...outcome.rotate });
-      outcome = { ...outcome, detail: `${outcome.detail}; токен доступа обновлён и сохранён` };
+    const adapter = adapterOf(integrationId);
+    if (!adapter) throw new ApiError("not_found", `Для интеграции ${integrationId} адаптер пока не реализован`);
+    const saved = credentialsOf(integrationId);
+    const creds = saved?.fields ?? {};
+    const missing = adapter.fields.filter((f) => (f.required ?? true) && !(creds[f.key] ?? "").trim()).map((f) => f.label);
+    if (missing.length > 0) {
+      throw new ApiError("validation", `Не заполнены ключи (${missing.join(", ")}) — нажмите «Ключи» и заполните поля`);
     }
-    // Этап 9: синхронизация с выборкой лидов — апсерт в снимок через серверное хранилище.
-    if (action === "sync" && outcome.ok && "leads" in outcome && outcome.leads) {
-      const leads = outcome.leads;
-      const api = getServerStore().api;
-      const funnels = await api.reference.funnels();
-      const funnel = funnels[0];
-      if (!funnel) throw new Error("в справочнике нет воронок для размещения импортированных лидов");
-      const counts = await importExternalLeads(api.leads, sourceSlug(integrationId), leads, {
-        funnelId: funnel.id,
-        stageId: funnel.stages[0],
-        agentId: funnel.agentId,
-        sourceLabel: sourceLabel(integrationId),
-        now: Date.now()
-      });
-      // Этап 12: полный (необрезанный) прогон сдвигает курсор — следующий принесёт только обновления;
-      // обрезанный потолком оставляет курсор на месте, следующий прогон продолжит выгрузку с прежнего места.
-      const truncated = outcome.truncated === true;
-      if (!truncated) saveSyncCursor(integrationId, started);
-      const cursorNote = truncated
-        ? "изменённых записей больше потолка прогона — курсор не сдвинут, повторите синхронизацию"
-        : "курсор синхронизации обновлён";
-      outcome = {
-        ...outcome,
-        detail: `${outcome.detail}; импортировано ${counts.created + counts.updated} (новых ${counts.created}, обновлено ${counts.updated}); ${cursorNote}`
-      };
+    // Этап 12: курсор инкремента — момент последнего успешного полного прогона (null — его ещё не было).
+    const cursorAt = action === "sync" ? syncCursorOf(integrationId) : null;
+    const started = Date.now();
+    let outcome: IntegrationRunOutcome | SyncResult;
+    try {
+      outcome = action === "check" ? await adapter.check(creds, fetchImpl) : await adapter.sync(creds, fetchImpl, cursorAt ?? undefined);
+      // Этап 10: адаптер мог обновить OAuth-токены — сохраняем новые ключи рядом с остальными.
+      if (outcome.ok && outcome.rotate) {
+        saveCredentials(integrationId, { ...creds, ...outcome.rotate });
+        outcome = { ...outcome, detail: `${outcome.detail}; токен доступа обновлён и сохранён` };
+      }
+      // Этап 9: синхронизация с выборкой лидов — апсерт в снимок через серверное хранилище.
+      if (action === "sync" && outcome.ok && "leads" in outcome && outcome.leads) {
+        const leads = outcome.leads;
+        const api = getServerStore().api;
+        const funnels = await api.reference.funnels();
+        const funnel = funnels[0];
+        if (!funnel) throw new Error("в справочнике нет воронок для размещения импортированных лидов");
+        const counts = await importExternalLeads(api.leads, sourceSlug(integrationId), leads, {
+          funnelId: funnel.id,
+          stageId: funnel.stages[0],
+          agentId: funnel.agentId,
+          sourceLabel: sourceLabel(integrationId),
+          now: Date.now()
+        });
+        // Этап 12: полный (необрезанный) прогон сдвигает курсор — следующий принесёт только обновления;
+        // обрезанный потолком оставляет курсор на месте, следующий прогон продолжит выгрузку с прежнего места.
+        const truncated = outcome.truncated === true;
+        if (!truncated) saveSyncCursor(integrationId, started);
+        const cursorNote = truncated
+          ? "изменённых записей больше потолка прогона — курсор не сдвинут, повторите синхронизацию"
+          : "курсор синхронизации обновлён";
+        outcome = {
+          ...outcome,
+          detail: `${outcome.detail}; импортировано ${counts.created + counts.updated} (новых ${counts.created}, обновлено ${counts.updated}); ${cursorNote}`
+        };
+      }
+    } catch (e) {
+      outcome = { ok: false, detail: `Ошибка прогона: ${e instanceof Error ? e.message.slice(0, 200) : "неизвестная ошибка"}`, status: null };
     }
-  } catch (e) {
-    outcome = { ok: false, detail: `Ошибка прогона: ${e instanceof Error ? e.message.slice(0, 200) : "неизвестная ошибка"}`, status: null };
+    const run: IntegrationRun = {
+      id: randomUUID(),
+      integrationId,
+      action,
+      ok: outcome.ok,
+      detail: outcome.detail.slice(0, 500),
+      status: outcome.status,
+      latencyMs: Date.now() - started,
+      at: started
+    };
+    appendRun(run);
+    return run;
+  } finally {
+    releaseRunLock(integrationId);
   }
-  const run: IntegrationRun = {
-    id: randomUUID(),
-    integrationId,
-    action,
-    ok: outcome.ok,
-    detail: outcome.detail.slice(0, 500),
-    status: outcome.status,
-    latencyMs: Date.now() - started,
-    at: started
-  };
-  appendRun(run);
-  return run;
 }
