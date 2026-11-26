@@ -59,6 +59,18 @@ export function saveSyncCursor(integrationId: string, at: number): void {
   writeCredentials(file);
 }
 
+/** Этап 14: включена ли авто-синхронизация интеграции; записи нет — включена (поведение этапа 13). */
+export function autoSyncEnabledOf(integrationId: string): boolean {
+  return readCredentials().autoSync?.[integrationId]?.enabled ?? true;
+}
+
+/** Сохраняет тумблер авто-синхронизации («Интеграции» → карточка, этап 14). */
+export function saveAutoSync(integrationId: string, enabled: boolean): void {
+  const file = readCredentials();
+  file.autoSync = { ...file.autoSync, [integrationId]: { enabled } };
+  writeCredentials(file);
+}
+
 /**
  * Маска для показа в браузере: короткие значения полностью закрываются, у длинных виден
  * только хвост. Полное значение с сервера не уходит никогда.

@@ -377,6 +377,30 @@ export function useSaveCredentials() {
   });
 }
 
+/** Состояние тумблера «Автосинхронизация» (этап 14); null-integrationId — запрос отключён. */
+export const useAutoSync = (integrationId: string | null) =>
+  useQuery({
+    queryKey: ["autosync", integrationId],
+    queryFn: () =>
+      integrationFetch<{ integrationId: string; enabled: boolean }>(
+        `/api/integrations/auto-sync?integrationId=${encodeURIComponent(integrationId ?? "")}`
+      ),
+    enabled: integrationId !== null
+  });
+
+/** Переключение «Автосинхронизации» из карточки интеграции; состояние живёт в secrets.json. */
+export function useSetAutoSync() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ integrationId, enabled }: { integrationId: string; enabled: boolean }) =>
+      integrationFetch<{ ok: boolean; enabled: boolean }>("/api/integrations/auto-sync", {
+        method: "POST",
+        body: JSON.stringify({ integrationId, enabled })
+      }),
+    onSettled: (_d, _e, vars) => qc.invalidateQueries({ queryKey: ["autosync", vars.integrationId] })
+  });
+}
+
 /** Начало входа через amoCRM (этап 11): сервер возвращает адрес страницы авторизации для window.open. */
 export function useAmocrmAuthorize() {
   return useMutation({
