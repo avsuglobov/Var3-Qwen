@@ -119,11 +119,11 @@ describe("маршруты курсов, профиля и справочник�
   });
 
   it("company-profile: get и update", async () => {
-    const got = await profileGet();
+    const got = await profileGet(new Request("http://x/api/company-profile"));
     expect(got.status).toBe(200);
     const put = await profilePut(jsonRequest("http://x/api/company-profile", "PUT", { about: "Новое описание" }));
     expect(put.status).toBe(200);
-    const after = await profileGet();
+    const after = await profileGet(new Request("http://x/api/company-profile"));
     expect(((await after.json()) as { about: string }).about).toBe("Новое описание");
   });
 
@@ -138,7 +138,7 @@ describe("маршруты курсов, профиля и справочник�
 
 describe("данные и панель сбоев", () => {
   it("export → снимок с version:1; import заменяет коллекции и считает пропуски; битый JSON → 422", async () => {
-    const text = await (await exportRoute()).text();
+    const text = await (await exportRoute(new Request("http://x/api/data/export"))).text();
     expect(JSON.parse(text)).toMatchObject({ version: 1, LEADS: SEED_DATA.LEADS });
     const snapshot = JSON.stringify({ version: 1, LEADS: [lead(), "битая"], NOTIFICATIONS: [] });
     const imp = await importRoute(new Request("http://x/api/data/import", { method: "POST", body: snapshot }));
@@ -149,13 +149,13 @@ describe("данные и панель сбоев", () => {
 
   it("reset возвращает демо-данные после изменений", async () => {
     await createRoute(jsonRequest("http://x/api/collections/leads", "POST", lead()), colCtx("leads"));
-    expect((await resetRoute()).status).toBe(200);
+    expect((await resetRoute(new Request("http://x/api/data/reset"))).status).toBe(200);
     const leads = (await (await listRoute(new Request("http://x/api/collections/leads"), colCtx("leads"))).json()) as unknown[];
     expect(leads).toEqual(SEED_DATA.LEADS);
   });
 
   it("debug: fail → 503 unavailable на всех запросах данных; обратно false → работает", async () => {
-    expect(await (await debugGet()).json()).toEqual({ fail: false, latencyMs: 0 });
+    expect(await (await debugGet(new Request("http://x/api/debug"))).json()).toEqual({ fail: false, latencyMs: 0 });
     const on = await debugPost(jsonRequest("http://x/api/debug", "POST", { fail: true }));
     expect(await on.json()).toEqual({ fail: true, latencyMs: 0 });
     const res = await listRoute(new Request("http://x/api/collections/leads"), colCtx("leads"));

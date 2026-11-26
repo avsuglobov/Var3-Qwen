@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { useChannels, useCompanyProfile, useExportData, useImportData, useResetData, useSaveCompanyProfile } from "@/lib/api/hooks";
+import { useChannels, useCompanyProfile, useExportData, useImportData, useLogout, useResetData, useSaveCompanyProfile } from "@/lib/api/hooks";
 import {
   DEFAULT_SETTINGS_TAB,
   DEFAULT_TARIFF,
@@ -25,6 +25,8 @@ import type { CompanyProfile } from "@/lib/schemas";
  * «Уведомлений» (в сессии, как AIWS.store.switches), вкладка «Данные» с работающими
  * экспортом/импортом/сбросом через слой Api. Этап 7: смена тарифа сохраняется в профиле
  * компании; поля профиля и компании — демо-значения без сохранения (как fieldRow прототипа).
+ * Этап 15: во вкладке «Профиль» кнопка «Заблокировать» завершает сессию — приложение
+ * закрывается экраном разблокировки по PIN.
  */
 export function SettingsView() {
   const [tab, setTab] = useState(DEFAULT_SETTINGS_TAB);
@@ -66,12 +68,23 @@ function ProfileTab() {
   const [name, setName] = useState<string>(SETTINGS_DEFAULTS.profileName);
   const [email, setEmail] = useState<string>(SETTINGS_DEFAULTS.profileEmail);
   const [tz, setTz] = useState<string>(SETTINGS_DEFAULTS.profileTz);
+  const logout = useLogout();
   return (
     <div className="space-y-3">
       <Field label="Имя" value={name} onChange={setName} id="settings-name" testId="settings-field-name" />
       <Field label="Email" value={email} onChange={setEmail} id="settings-email" testId="settings-field-email" />
       <Field label="Часовой пояс" value={tz} onChange={setTz} id="settings-tz" testId="settings-field-tz" />
       <p className="text-[11.5px] text-muted-foreground">Сохранение профиля появится вместе с реальным бэкендом (в прототипе — «скоро»).</p>
+      {/* Этап 15: завершить сессию — приложение закрывается экраном разблокировки по PIN. */}
+      <div className="flex items-center justify-between gap-3 rounded-sm border border-input p-3" data-testid="settings-lock">
+        <div className="min-w-0">
+          <p className="text-sm font-medium">Защита приложения</p>
+          <p className="text-xs text-muted-foreground">Завершить сессию на этом устройстве — до ввода PIN приложение закрыто.</p>
+        </div>
+        <Button variant="secondary" size="sm" disabled={logout.isPending} onClick={() => logout.mutate()} data-testid="settings-lock-button">
+          Заблокировать
+        </Button>
+      </div>
     </div>
   );
 }

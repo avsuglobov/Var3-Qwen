@@ -1,4 +1,5 @@
 import { amocrmAuthorizeCallback } from "@/lib/server/oauth-amocrm";
+import { guardApi } from "@/lib/server/auth";
 
 /**
  * GET /api/integrations/amocrm/callback — колбэк входа через amoCRM (этап 11): обмен кода
@@ -10,6 +11,8 @@ function escapeHtml(text: string): string {
 }
 
 export async function GET(req: Request) {
+  const denied = guardApi(req);
+  if (denied) return denied;
   const url = new URL(req.url);
   const result = await amocrmAuthorizeCallback({ code: url.searchParams.get("code"), state: url.searchParams.get("state"), origin: url.origin });
   const page = [

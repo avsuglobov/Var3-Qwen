@@ -32,8 +32,8 @@ async function main() {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await ctx.newPage();
     const problems = [], hosts = new Set();
-    // намеренные ошибки сети из сценариев (сбой 503, битый импорт 422) браузер пишет в консоль как «Failed to load resource»; это не ошибки приложения
-    page.on("console", (m) => { if (["error", "warning"].includes(m.type()) && !/Failed to load resource.*status of (503|422)/.test(m.text())) problems.push(m.type() + ": " + m.text().slice(0, 200)); });
+    // намеренные ошибки сети из сценариев (сбой 503, битый импорт 422, закрытый API 401 этапа 15) браузер пишет в консоль как «Failed to load resource»; это не ошибки приложения
+    page.on("console", (m) => { if (["error", "warning"].includes(m.type()) && !/Failed to load resource.*status of (503|422|401)/.test(m.text())) problems.push(m.type() + ": " + m.text().slice(0, 200)); });
     page.on("pageerror", (e) => problems.push("pageerror: " + String(e).slice(0, 200)));
     page.on("request", (r) => { try { hosts.add(new URL(r.url()).host); } catch { /* data: */ } });
 
@@ -292,6 +292,42 @@ async function main() {
       }
     }
     check("контраст WCAG AA на всех разделах в обеих темах" + (Object.keys(bad2).length ? "\n     " + Object.entries(bad2).slice(0, 5).map(([k, v]) => `${v.ratio} ${k}`).join("\n     ") : ""), Object.keys(bad2).length === 0);
+
+    // ---------- этап 15: защита API — PIN-сессия и экран разблокировки
+    const st0 = await page.evaluate(() => fetch("/api/auth/status").then((r) => r.json()));
+    check("этап 15: без PIN API открыт — статус setup:false/unlocked:true, гейт не показан", st0.setup === false && st0.unlocked === true && (await page.locator("[data-testid=auth-gate]").count()) === 0);
+    const setupRes = await fetch(BASE + "/api/auth/setup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pin: "1555", pin2: "1555" }) });
+    check("этап 15: POST setup создаёт PIN и HttpOnly-куку сессии", setupRes.status === 200 && (setupRes.headers.get("set-cookie") ?? "").includes("HttpOnly"));
+    const setupAgain = await fetch(BASE + "/api/auth/setup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pin: "2666", pin2: "2666" }) });
+    check("этап 15: повторный setup — 409 «уже задан»", setupAgain.status === 409 && JSON.stringify(await setupAgain.json()).includes("уже задан"));
+    const lockedRuns = await fetch(BASE + "/api/integrations/runs");
+    check("этап 15: без сессии /api/* закрыт — 401 «Требуется вход»", lockedRuns.status === 401 && JSON.stringify(await lockedRuns.json()).includes("Требуется вход"));
+    const stBrowser = await page.evaluate(() => fetch("/api/auth/status").then((r) => r.json()));
+    check("этап 15: браузер без куки — unlocked:false (сессия set-cookie не шарится между клиентами)", stBrowser.unlocked === false);
+    await open("/integrations");
+    await page.waitForSelector("[data-testid=auth-gate]", { timeout: 8000 });
+    check("этап 15: перезагрузка — экран блокировки поверх приложения", (await page.locator("[data-testid=auth-gate]").count()) === 1);
+    await page.locator("[data-testid=auth-pin]").fill("9999");
+    await page.locator("[data-testid=auth-submit]").click();
+    await page.waitForSelector("[data-testid=auth-error]", { timeout: 8000 });
+    check("этап 15: неверный PIN — «Неверный PIN», приложение всё ещё закрыто", (await page.locator("[data-testid=auth-error]").innerText()).includes("Неверный PIN") && (await page.locator("[data-testid=auth-gate]").count()) === 1);
+    await page.locator("[data-testid=auth-pin]").fill("1555");
+    await page.locator("[data-testid=auth-submit]").click();
+    await page.waitForFunction(() => !document.querySelector("[data-testid=auth-gate]"), { timeout: 8000 });
+    await page.waitForSelector("[data-testid=integrations-card]", { timeout: 8000 });
+    const stAfter = await page.evaluate(() => fetch("/api/auth/status").then((r) => r.json()));
+    check("этап 15: верный PIN — гейт ушёл, карточки на месте, статус unlocked:true", stAfter.unlocked === true && (await page.locator("[data-testid=integrations-card]").count()) === 8);
+    await open("/settings");
+    await page.locator("[data-testid=settings-lock-button]").click();
+    await page.waitForSelector("[data-testid=auth-gate]", { timeout: 8000 });
+    check("этап 15: «Заблокировать» в Настройках — экран блокировки вернулся", (await page.locator("[data-testid=auth-gate]").count()) === 1);
+    await page.locator("[data-testid=auth-pin]").fill("1555");
+    await page.locator("[data-testid=auth-submit]").click();
+    await page.waitForFunction(() => !document.querySelector("[data-testid=auth-gate]"), { timeout: 8000 });
+    check("этап 15: повторная разблокировка — API снова отвечает 200 с сессией", (await page.evaluate(() => fetch("/api/integrations/runs").then((r) => r.status))) === 200);
+    fs.rmSync(".data/secrets.json", { force: true }); // сброс PIN: не оставлять блокировку следующим наборам (a11y)
+    const stReset = await fetch(BASE + "/api/auth/status").then((r) => r.json());
+    check("этап 15: сброс secrets.json возвращает открытый режим (совместимость наборов e2e)", stReset.setup === false && stReset.unlocked === true);
 
     check("нет внешних запросов", [...hosts].every((h) => /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(h)), [...hosts].join(","));
     check("консоль: нет ошибок и предупреждений (hydration, React)" + (problems.length ? " [" + problems.slice(0, 3).join(" | ") + "]" : ""), problems.length === 0);

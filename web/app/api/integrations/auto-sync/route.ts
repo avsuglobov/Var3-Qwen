@@ -2,6 +2,7 @@ import { ApiError } from "@/lib/api/types";
 import { adapterOf } from "@/lib/integrations/adapters";
 import { errorResponse, readJsonBody } from "@/lib/server/store";
 import { autoSyncEnabledOf, saveAutoSync } from "@/lib/server/secrets";
+import { guardApi } from "@/lib/server/auth";
 
 /**
  * Тумблер авто-синхронизации (этап 14). Состояние — блок autoSync в .data/secrets.json
@@ -17,6 +18,8 @@ function requireIntegrationId(req: Request): string {
 
 /** GET /api/integrations/auto-sync?integrationId=… — текущее состояние тумблера. */
 export async function GET(req: Request) {
+  const denied = guardApi(req);
+  if (denied) return denied;
   try {
     const integrationId = requireIntegrationId(req);
     if (!adapterOf(integrationId)) throw new ApiError("not_found", `Для интеграции ${integrationId} адаптер пока не реализован`);
@@ -28,6 +31,8 @@ export async function GET(req: Request) {
 
 /** POST /api/integrations/auto-sync — переключает тумблер: { integrationId, enabled }. */
 export async function POST(req: Request) {
+  const denied = guardApi(req);
+  if (denied) return denied;
   try {
     const body = (await readJsonBody(req)) as { integrationId?: unknown; enabled?: unknown };
     if (typeof body.integrationId !== "string" || body.integrationId.length === 0 || body.integrationId.length > 40) {

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { credentialsFileSchema, type CredentialsFile } from "@/lib/integrations/types";
+import { credentialsFileSchema, type AuthBlock, type CredentialsFile } from "@/lib/integrations/types";
 
 /**
  * Хранилище ключей внешних сервисов (этап 8): файл `.data/secrets.json` рядом со снимком,
@@ -68,6 +68,18 @@ export function autoSyncEnabledOf(integrationId: string): boolean {
 export function saveAutoSync(integrationId: string, enabled: boolean): void {
   const file = readCredentials();
   file.autoSync = { ...file.autoSync, [integrationId]: { enabled } };
+  writeCredentials(file);
+}
+
+/** Блок защиты API (этап 15); null — PIN ещё не задан, API открыт для первичной настройки. */
+export function readAuthBlock(): AuthBlock | null {
+  return readCredentials().auth ?? null;
+}
+
+/** Атомарно сохраняет блок защиты (PIN-хэш и сессии) в secrets.json. */
+export function writeAuthBlock(auth: AuthBlock): void {
+  const file = readCredentials();
+  file.auth = auth;
   writeCredentials(file);
 }
 

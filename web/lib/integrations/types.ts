@@ -86,6 +86,21 @@ export type SyncCursor = z.infer<typeof syncCursorSchema>;
 export const autoSyncStateSchema = z.object({ enabled: z.boolean() });
 export type AutoSyncState = z.infer<typeof autoSyncStateSchema>;
 
+/** Сессия разблокировки (этап 15): случайный токен HttpOnly-куки и время создания. */
+export const authSessionSchema = z.object({
+  token: z.string().min(16).max(128),
+  createdAt: z.number().int().positive()
+});
+export type AuthSession = z.infer<typeof authSessionSchema>;
+
+/** Блок защиты API (этап 15): scrypt-хэш PIN, соль и активные сессии; лежит рядом с ключами, вне снимка и экспорта. */
+export const authBlockSchema = z.object({
+  pinHash: z.string().min(16).max(200),
+  pinSalt: z.string().min(8).max(100),
+  sessions: z.array(authSessionSchema).max(20).default([])
+});
+export type AuthBlock = z.infer<typeof authBlockSchema>;
+
 /** Содержимое файла секретов: ключи не попадают в снимок, экспорт данных и клиент. */
 export const credentialsFileSchema = z.object({
   version: z.literal(1),
@@ -99,7 +114,9 @@ export const credentialsFileSchema = z.object({
   /** Курсоры инкрементальной синхронизации (этап 12): по интеграции — момент последнего успешного полного прогона. */
   syncCursor: z.record(z.string().max(40), syncCursorSchema).optional(),
   /** Тумблер авто-синхронизации (этап 14): по интеграции — включена ли автосинхронизация (записи нет — включена). */
-  autoSync: z.record(z.string().max(40), autoSyncStateSchema).optional()
+  autoSync: z.record(z.string().max(40), autoSyncStateSchema).optional(),
+  /** Защита API (этап 15): PIN-хэш и активные сессии; блока нет — PIN не задан, API открыт. */
+  auth: authBlockSchema.optional()
 });
 export type CredentialsFile = z.infer<typeof credentialsFileSchema>;
 
