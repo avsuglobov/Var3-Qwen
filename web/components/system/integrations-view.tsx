@@ -7,12 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/state";
-import { useCompanyProfile, useIntegrationAction, useIntegrationRuns, useIntegrations, useSaveCompanyProfile } from "@/lib/api/hooks";
+import { useAutoSync, useCompanyProfile, useIntegrationAction, useIntegrationRuns, useIntegrations, useSaveCompanyProfile, useSetAutoSync } from "@/lib/api/hooks";
 import { CredentialsDialog } from "@/components/system/credentials-dialog";
 import { adapterOf } from "@/lib/integrations/adapters";
 import type { IntegrationRun } from "@/lib/integrations/types";
 import { applyConnectionStates, integrationStatusText } from "@/lib/selectors/system";
 import { cn } from "@/lib/utils";
+import { Switch } from "@/components/ui/switch";
 import type { Integration } from "@/lib/schemas";
 
 const INTEGRATION_ICON: Record<string, typeof FileText> = {
@@ -33,6 +34,9 @@ const INTEGRATION_ICON: Record<string, typeof FileText> = {
  * (amoCRM, Bitrix24, REST API/webhook) кнопки «Ключи», «Проверить связь» и
  * «Синхронизировать» выполняют реальные HTTP-запросы через сервер, журнал прогонов —
  * в .data/integration-runs.json; у остальных карточек адаптер появится позже.
+ * Этап 14: у интеграций с адаптерами тумблер «Автосинхронизация (15 мин)» включает/выключает
+ * серверный планировщик для карточки (состояние в .data/secrets.json), прогоны планировщика
+ * в журнале помечены припиской «(авто)».
  */
 export function IntegrationsView() {
   const integrationsQ = useIntegrations();
@@ -113,6 +117,7 @@ export function IntegrationsView() {
             onKeys={() => setKeysFor(it)}
             onAction={runAction}
             actionBusy={actionM.isPending && actionM.variables?.integrationId === it.id}
+            onAutoSyncResult={(message) => setFeedback(message)}
           />
         ))}
       </div>
@@ -123,6 +128,8 @@ export function IntegrationsView() {
         <Plug className="size-3.5" aria-hidden />
         Состояние подключения сохраняется в данных приложения. «Проверить связь» и «Синхронизировать» выполняют реальные
         HTTP-запросы через сервер; ключи вводятся вручную («Ключи») и хранятся в .data/secrets.json — в браузер отдаётся только маска.
+        Тумблер «Автосинхронизация» включает прогоны планировщиком каждые 15 минут (состояние — в secrets.json), такие прогоны
+        в журнале помечены «(авто)».
       </p>
     </div>
   );
@@ -132,16 +139,44 @@ function nameOf(items: readonly Integration[], id: string): string {
   return items.find((it) => it.id === id)?.name ?? id;
 }
 
-/** Строка последнего прогона: статус не только цветом (точка + слово «успех»/«ошибка»). */
+/** Строка последнего прогона: статус не только цветом (точка + слово «успех»/«ошибка»);
+    прогоны планировщика — приписка «(авто)» (этап 14). */
 function RunLine({ run }: { run: IntegrationRun }) {
   const time = new Date(run.at).toLocaleTimeString("ru-RU", { hour12: false });
   return (
     <p className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground" data-testid="integrations-run" data-int={run.integrationId}>
       <span className={cn("size-1.5 shrink-0 rounded-full", run.ok ? "bg-status" : "bg-critical")} aria-hidden />
       <span className="min-w-0 truncate">
-        {run.action === "check" ? "Проверка" : "Синхронизация"} · {run.ok ? "успех" : "ошибка"} · {run.detail} · {time}
+        {run.action === "check" ? "Проверка" : "Синхронизация"}
+        {run.trigger === "auto" ? " (авто)" : ""} · {run.ok ? "успех" : "ошибка"} · {run.detail} · {time}
       </span>
     </p>
+  );
+}
+
+/** Тумблер «Автосинхронизация (15 мин)» карточки (этап 14): состояние — в .data/secrets.json
+    (маршрут /api/integrations/auto-sync); записи нет — включена (поведение этапа 13). */
+function AutoSyncRow({ id, name, onResult }: { id: string; name: string; onResult: (message: string) => void }) {
+  const q = useAutoSync(id);
+  const set = useSetAutoSync();
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-2" data-testid="integrations-autosync-row" data-int={id}>
+      <span className="min-w-0 truncate text-[11px] text-muted-foreground">Автосинхронизация (15 мин)</span>
+      <Switch
+        checked={q.data?.enabled ?? true}
+        label={`Автосинхронизация ${name}`}
+        testId="integrations-autosync"
+        onCheckedChange={(next) =>
+          set.mutate(
+            { integrationId: id, enabled: next },
+            {
+              onSuccess: () => onResult(`${name}: автосинхронизация ${next ? "включена" : "выключена"}`),
+              onError: (e) => onResult(e.message)
+            }
+          )
+        }
+      />
+    </div>
   );
 }
 
@@ -151,7 +186,8 @@ function IntegrationCard({
   onToggle,
   onKeys,
   onAction,
-  actionBusy
+  actionBusy,
+  onAutoSyncResult
 }: {
   item: Integration;
   run: IntegrationRun | null;
@@ -159,6 +195,7 @@ function IntegrationCard({
   onKeys: () => void;
   onAction: (id: string, action: "check" | "sync") => void;
   actionBusy: boolean;
+  onAutoSyncResult: (message: string) => void;
 }) {
   const Icon = INTEGRATION_ICON[item.icon] ?? Plug;
   const connected = item.connected;
@@ -189,6 +226,7 @@ function IntegrationCard({
                 Синхронизировать
               </Button>
             </div>
+            <AutoSyncRow id={item.id} name={item.name} onResult={onAutoSyncResult} />
             {run ? <RunLine run={run} /> : <p className="text-[11px] text-muted-foreground">Прогонов ещё не было</p>}
           </div>
         ) : (

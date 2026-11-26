@@ -49,6 +49,10 @@ export type ExternalLead = z.infer<typeof externalLeadSchema>;
     следующий прогон продолжит выгрузку с прежнего места. */
 export type SyncResult = IntegrationRunOutcome & { leads?: ExternalLead[]; truncated?: boolean };
 
+/** Кто запустил прогон: ручная кнопка или тик авто-синхронизации (этап 14). */
+export const runTrigger = z.enum(["auto", "manual"]);
+export type RunTrigger = z.infer<typeof runTrigger>;
+
 /** Запись журнала интеграций (.data/integration-runs.json, вне снимка данных). */
 export const integrationRunSchema = z.object({
   id: z.string().max(40),
@@ -59,7 +63,9 @@ export const integrationRunSchema = z.object({
   status: z.number().int().nullable(),
   latencyMs: z.number().int().min(0).nullable(),
   /** Время прогона, мс с эпохи. */
-  at: z.number().int()
+  at: z.number().int(),
+  /** Этап 14: кто запустил прогон; в записях до этапа 14 поля нет — журнал совместим со старыми файлами. */
+  trigger: runTrigger.optional()
 });
 export type IntegrationRun = z.infer<typeof integrationRunSchema>;
 
@@ -76,6 +82,10 @@ export const syncCursorSchema = z.object({
 });
 export type SyncCursor = z.infer<typeof syncCursorSchema>;
 
+/** Состояние тумблера авто-синхронизации интеграции (этап 14). */
+export const autoSyncStateSchema = z.object({ enabled: z.boolean() });
+export type AutoSyncState = z.infer<typeof autoSyncStateSchema>;
+
 /** Содержимое файла секретов: ключи не попадают в снимок, экспорт данных и клиент. */
 export const credentialsFileSchema = z.object({
   version: z.literal(1),
@@ -87,7 +97,9 @@ export const credentialsFileSchema = z.object({
   /** Незавершённые входы через OAuth (этап 11): по интеграции — одноразовый state. */
   pending: z.record(z.string().max(40), oauthPendingSchema).optional(),
   /** Курсоры инкрементальной синхронизации (этап 12): по интеграции — момент последнего успешного полного прогона. */
-  syncCursor: z.record(z.string().max(40), syncCursorSchema).optional()
+  syncCursor: z.record(z.string().max(40), syncCursorSchema).optional(),
+  /** Тумблер авто-синхронизации (этап 14): по интеграции — включена ли автосинхронизация (записи нет — включена). */
+  autoSync: z.record(z.string().max(40), autoSyncStateSchema).optional()
 });
 export type CredentialsFile = z.infer<typeof credentialsFileSchema>;
 

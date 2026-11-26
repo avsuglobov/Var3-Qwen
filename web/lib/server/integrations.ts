@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { ApiError } from "@/lib/api/types";
 import { adapterOf } from "@/lib/integrations/adapters";
 import { importExternalLeads } from "@/lib/integrations/import-map";
-import type { IntegrationAction, IntegrationRun, IntegrationRunOutcome, SyncResult } from "@/lib/integrations/types";
+import type { IntegrationAction, IntegrationRun, IntegrationRunOutcome, RunTrigger, SyncResult } from "@/lib/integrations/types";
 import { INTEGRATIONS } from "@/lib/mock-data/reference";
 import { appendRun } from "@/lib/server/runs";
 import { credentialsOf, saveCredentials, saveSyncCursor, syncCursorOf } from "@/lib/server/secrets";
@@ -23,6 +23,8 @@ import { getServerStore } from "@/lib/server/store";
  * fetchImpl — секам для unit-тестов; в продакшене используется глобальный fetch.
  * Этап 13: параллельные прогоны одной интеграции блокируются — ручной прогон при занятой
  * интеграции отвечает 409 duplicate, тик авто-синхронизации занятую интеграцию пропускает.
+ * Этап 14: у прогона есть trigger — ручная кнопка «manual», тик планировщика «auto»
+ * (в журнале и UI показывается припиской «(авто)»); старые записи без поля остаются валидны.
  */
 
 /** Слаг источника для id лидов: int-amocrm → amocrm, int-demo → demo. */
@@ -56,7 +58,7 @@ export function releaseRunLock(integrationId: string): void {
   runLocks.delete(integrationId);
 }
 
-export async function runIntegration(integrationId: string, action: IntegrationAction, fetchImpl: typeof fetch = fetch): Promise<IntegrationRun> {
+export async function runIntegration(integrationId: string, action: IntegrationAction, fetchImpl: typeof fetch = fetch, trigger: RunTrigger = "manual"): Promise<IntegrationRun> {
   if (!acquireRunLock(integrationId)) {
     throw new ApiError("duplicate", "Для этой интеграции уже выполняется прогон — дождитесь его завершения");
   }
@@ -117,7 +119,8 @@ export async function runIntegration(integrationId: string, action: IntegrationA
       detail: outcome.detail.slice(0, 500),
       status: outcome.status,
       latencyMs: Date.now() - started,
-      at: started
+      at: started,
+      trigger
     };
     appendRun(run);
     return run;

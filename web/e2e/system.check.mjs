@@ -152,6 +152,22 @@ async function main() {
     await open("/integrations");
     check("после перезагрузки: последний прогон на месте (журнал серверный)", (await page.locator("[data-testid=integrations-run]").count()) === 1 && /Проверка · ошибка/.test(await page.locator("[data-testid=integrations-run]").innerText()));
 
+    // ---------- этап 14: тумблер «Автосинхронизация (15 мин)» и приписка «(авто)»
+    check("этап 14: у трёх карточек с адаптером ряд «Автосинхронизация», тумблер включён по умолчанию", (await page.locator("[data-testid=integrations-autosync-row]").count()) === 3 && (await page.locator("[data-testid=integrations-autosync]").count()) === 3 && (await page.locator("[data-testid=integrations-autosync-row][data-int=int-api] [role=switch]").getAttribute("aria-checked")) === "true");
+    check("этап 14: ручной прогон в журнале без приписки «(авто)»", !(await page.locator("[data-testid=integrations-run][data-int=int-api]").innerText()).includes("(авто)"));
+    await page.locator("[data-testid=integrations-autosync-row][data-int=int-api] [role=switch]").click();
+    await page.waitForFunction(() => document.querySelector("[data-testid=integrations-feedback]")?.textContent?.includes("автосинхронизация выключена"), { timeout: 8000 });
+    const autoState = await fetch(BASE + "/api/integrations/auto-sync?integrationId=int-api").then((r) => r.json());
+    check("этап 14: тумблер выключен — feedback и состояние на сервере (блок autoSync в secrets.json)", (await page.locator("[data-testid=integrations-autosync-row][data-int=int-api] [role=switch]").getAttribute("aria-checked")) === "false" && autoState.enabled === false);
+    await open("/integrations");
+    check("этап 14: после перезагрузки тумблер всё ещё выключен", (await page.locator("[data-testid=integrations-autosync-row][data-int=int-api] [role=switch]").getAttribute("aria-checked")) === "false");
+    const autoPostBad = await fetch(BASE + "/api/integrations/auto-sync", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ integrationId: "int-api", enabled: "yes" }) });
+    check("этап 14: POST без булева enabled — 400 validation", autoPostBad.status === 400 && JSON.stringify(await autoPostBad.json()).includes("булевым"));
+    check("этап 14: GET тумблера интеграции без адаптера — 404", (await fetch(BASE + "/api/integrations/auto-sync?integrationId=int-tg")).status === 404);
+    await page.locator("[data-testid=integrations-autosync-row][data-int=int-api] [role=switch]").click();
+    await page.waitForFunction(() => document.querySelector("[data-testid=integrations-feedback]")?.textContent?.includes("автосинхронизация включена"), { timeout: 8000 });
+    check("этап 14: повторное включение — состояние снова true", (await fetch(BASE + "/api/integrations/auto-sync?integrationId=int-api").then((r) => r.json())).enabled === true);
+
     // ---------- этап 9: синхронизация переносит данные — демо-источник int-demo (без сети)
     const sync1 = await fetch(BASE + "/api/integrations/sync", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ integrationId: "int-demo" }) }).then((r) => r.json());
     check("этап 9: sync int-demo — «Демо-источник вернул 3 лида; импортировано 3 (новых 3, обновлено 0)»", sync1.run?.ok === true && /импортировано 3 \(новых 3, обновлено 0\)/.test(sync1.run?.detail ?? ""));
