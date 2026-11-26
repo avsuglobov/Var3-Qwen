@@ -44,8 +44,10 @@ export const externalLeadSchema = z.object({
 });
 export type ExternalLead = z.infer<typeof externalLeadSchema>;
 
-/** Результат синхронизации: итог связи плюс — если адаптер переносит данные — полученные лиды. */
-export type SyncResult = IntegrationRunOutcome & { leads?: ExternalLead[] };
+/** Результат синхронизации: итог связи плюс — если адаптер переносит данные — полученные лиды.
+    Этап 12: truncated — изменённых записей больше потолка прогона; курсор не сдвигается,
+    следующий прогон продолжит выгрузку с прежнего места. */
+export type SyncResult = IntegrationRunOutcome & { leads?: ExternalLead[]; truncated?: boolean };
 
 /** Запись журнала интеграций (.data/integration-runs.json, вне снимка данных). */
 export const integrationRunSchema = z.object({
@@ -67,6 +69,13 @@ export const oauthPendingSchema = z.object({
   createdAt: z.number().int().positive()
 });
 
+/** Курсор инкрементальной синхронизации (этап 12): момент последнего успешного полного прогона. */
+export const syncCursorSchema = z.object({
+  /** Момент прогона, мс с эпохи: следующий sync фильтрует внешние записи «обновлённые с этого момента». */
+  at: z.number().int().positive()
+});
+export type SyncCursor = z.infer<typeof syncCursorSchema>;
+
 /** Содержимое файла секретов: ключи не попадают в снимок, экспорт данных и клиент. */
 export const credentialsFileSchema = z.object({
   version: z.literal(1),
@@ -76,7 +85,9 @@ export const credentialsFileSchema = z.object({
     updatedAt: z.number().int()
   })),
   /** Незавершённые входы через OAuth (этап 11): по интеграции — одноразовый state. */
-  pending: z.record(z.string().max(40), oauthPendingSchema).optional()
+  pending: z.record(z.string().max(40), oauthPendingSchema).optional(),
+  /** Курсоры инкрементальной синхронизации (этап 12): по интеграции — момент последнего успешного полного прогона. */
+  syncCursor: z.record(z.string().max(40), syncCursorSchema).optional()
 });
 export type CredentialsFile = z.infer<typeof credentialsFileSchema>;
 
@@ -88,8 +99,13 @@ export interface IntegrationAdapter {
   readonly id: string;
   readonly fields: readonly IntegrationFieldDef[];
   check(creds: Record<string, string>, fetchImpl?: typeof fetch): Promise<IntegrationRunOutcome>;
-  /** Синхронизация: доступность сервиса, а с этапа 9 — и выборка лидов (leads, если адаптер переносит данные). */
-  sync(creds: Record<string, string>, fetchImpl?: typeof fetch): Promise<SyncResult>;
+  /**
+   * Синхронизация: доступность сервиса, а с этапа 9 — и выборка лидов (leads, если адаптер переносит данные).
+   * Этап 12: cursorAt (мс с эпохи) — курсор последнего успешного полного прогона; адаптер, поддерживающий
+   * инкремент, фильтрует внешние записи «обновлённые с этого момента», пагинирует выборку до потолка
+   * прогона и помечает обрезку флагом truncated. Источники без инкремента (webhook, демо) курсор игнорируют.
+   */
+  sync(creds: Record<string, string>, fetchImpl?: typeof fetch, cursorAt?: number): Promise<SyncResult>;
 }
 
 /** Итог «до сети»: некорректная конфигурация адаптера (нет ключей, битый формат адреса). */

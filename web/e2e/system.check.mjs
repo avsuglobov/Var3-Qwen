@@ -163,6 +163,7 @@ async function main() {
     check("этап 9: импортированные лиды видны в канбане CRM", (await page.locator("main").innerText()).includes("Импорт: сделка Г"));
     const sync2 = await fetch(BASE + "/api/integrations/sync", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ integrationId: "int-demo" }) }).then((r) => r.json());
     check("этап 9: повторный sync идемпотентен — «импортировано 3 (новых 0, обновлено 3)»", sync2.run?.ok === true && /импортировано 3 \(новых 0, обновлено 3\)/.test(sync2.run?.detail ?? ""));
+    check("этап 12: полный sync сдвигает курсор инкремента — в деталях обоих прогонов «курсор синхронизации обновлён»", /курсор синхронизации обновлён/.test(sync1.run?.detail ?? "") && /курсор синхронизации обновлён/.test(sync2.run?.detail ?? ""));
     await open("/integrations");
     check("этап 9: демо-источник не появляется в интерфейсе (кнопок адаптера по-прежнему 3)", (await page.locator("[data-testid=integrations-check]").count()) === 3);
 

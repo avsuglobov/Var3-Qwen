@@ -9,13 +9,22 @@ import { configError, netError, type ExternalLead, type IntegrationAdapter, type
  * выборку лидов (до 25 записей) — их маппинг и запись в снимок делает маршрут синхронизации.
  * Этап 10: авторизация amoCRM — долгоживущий токен или OAuth-тройка; при OAuth свежие токены
  * возвращаются в rotate, исполнитель сохраняет их в .data/secrets.json автоматически.
+ * Этап 12: синхронизация инкрементальная — курсор «последний успешный полный прогон» приходит
+ * из secrets.json; amoCRM фильтрует по filter[updated_at][from] (unix-секунды), Bitrix24 — по
+ * «>=DATE_MODIFY» (ISO 8601), выборка пагинируется до потолка 250 записей за прогон; при обрезке
+ * адаптер помечает truncated и исполнитель не двигает курсор. Демо-источник и webhook курсор
+ * не поддерживают — отдают выборку целиком, как раньше.
  * В e2e сеть не трогается: реальный обмен покрывают unit-тесты с подставленным fetch,
  * e2e использует webhook-адаптер с адресом самого приложения и демо-источник int-demo.
  */
 
 const TIMEOUT_MS = 10_000;
-/** Сколько записей запрашивает синхронизация за один прогон (первая страница, новые сверху). */
+/** Сколько записей запрашивает синхронизация за одну страницу amoCRM (потолок API — 250). */
 const SYNC_PAGE = 25;
+/** Этап 12: потолок записей одного прогона; изменённые сверх потолка остаются на следующие прогоны. */
+const SYNC_CEILING = 250;
+/** Этап 12: перекрытие курсора — фильтр берёт записи «обновлённые за минуту до сохранённого момента»; повторы гасит апсерт. */
+const CURSOR_OVERLAP_MS = 60_000;
 
 /** Базовый вызов: единая обработка статусов, таймаута и сетевых ошибок. */
 async function call(url: string, init: RequestInit, fetchImpl: typeof fetch): Promise<IntegrationRunOutcome> {
@@ -117,23 +126,36 @@ export const amocrmAdapter: IntegrationAdapter = {
       return netError(e);
     }
   },
-  async sync(creds, fetchImpl = fetch) {
+  async sync(creds, fetchImpl = fetch, cursorAt?: number) {
     const subdomain = (creds.subdomain ?? "").trim();
     if (!AMOCRM_SUBDOMAIN_RE.test(subdomain)) return configError("Не задан корректный поддомен amoCRM (буквы, цифры и дефис)");
     const auth = await amocrmAuth(creds, fetchImpl);
     if (!("token" in auth)) return auth;
     try {
-      const res = await fetchImpl(`https://${subdomain}.amocrm.ru/api/v4/leads?limit=${SYNC_PAGE}`, {
-        headers: { authorization: `Bearer ${auth.token}` },
-        signal: AbortSignal.timeout(TIMEOUT_MS)
-      });
-      if (!res.ok) return { ok: false, detail: `amoCRM ответил HTTP ${res.status} при запросе сделок`, status: res.status };
-      const body = (await res.json().catch(() => null)) as { _embedded?: { leads?: unknown[] } } | null;
-      const leads = (body?._embedded?.leads ?? []).flatMap((raw) => {
-        const lead = amocrmLead(raw);
-        return lead ? [lead] : [];
-      });
-      return { ok: true, detail: `Получено сделок: ${leads.length}`, status: res.status, leads, ...(auth.rotate ? { rotate: auth.rotate } : {}) };
+      // Этап 12: инкрементальный фильтр по updated_at (unix-секунды) с минутным перекрытием — расхождение часов гасит апсерт.
+      const fromSec = typeof cursorAt === "number" ? Math.floor((cursorAt - CURSOR_OVERLAP_MS) / 1000) : null;
+      const filter = fromSec !== null ? `&filter[updated_at][from]=${fromSec}` : "";
+      const leads: ExternalLead[] = [];
+      let status = 200;
+      for (let page = 1; ; page += 1) {
+        const res = await fetchImpl(`https://${subdomain}.amocrm.ru/api/v4/leads?limit=${SYNC_PAGE}&page=${page}${filter}`, {
+          headers: { authorization: `Bearer ${auth.token}` },
+          signal: AbortSignal.timeout(TIMEOUT_MS)
+        });
+        status = res.status;
+        if (!res.ok) return { ok: false, detail: `amoCRM ответил HTTP ${res.status} при запросе сделок (страница ${page})`, status: res.status };
+        const body = (await res.json().catch(() => null)) as { _embedded?: { leads?: unknown[] }; _links?: { next?: { href?: string } } } | null;
+        for (const raw of body?._embedded?.leads ?? []) {
+          const lead = amocrmLead(raw);
+          if (lead) leads.push(lead);
+        }
+        if (!body?._links?.next?.href) break; // ссылки на следующую страницу нет — выборка кончилась
+        if (leads.length >= SYNC_CEILING) {
+          // Потолок прогона: остальное — на следующие прогоны, курсор не сдвигается (решает исполнитель).
+          return { ok: true, detail: `Получено сделок: ${leads.length}`, status, leads, truncated: true, ...(auth.rotate ? { rotate: auth.rotate } : {}) };
+        }
+      }
+      return { ok: true, detail: `Получено сделок: ${leads.length}`, status, leads, ...(auth.rotate ? { rotate: auth.rotate } : {}) };
     } catch (e) {
       return netError(e);
     }
@@ -174,23 +196,43 @@ export const bitrix24Adapter: IntegrationAdapter = {
       return netError(e);
     }
   },
-  async sync(creds, fetchImpl = fetch) {
+  async sync(creds, fetchImpl = fetch, cursorAt?: number) {
     const base = normalizeWebhook(creds.webhookUrl);
     if (!base) return configError("Не задан корректный адрес вебхука Bitrix24 (https://…/rest/…)");
     try {
-      const res = await fetchImpl(`${base}crm.lead.list.json`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ order: { ID: "DESC" }, limit: SYNC_PAGE }),
-        signal: AbortSignal.timeout(TIMEOUT_MS)
-      });
-      if (!res.ok) return { ok: false, detail: `Bitrix24 ответил HTTP ${res.status} при запросе лидов`, status: res.status };
-      const body = (await res.json().catch(() => null)) as { result?: unknown[] } | null;
-      const leads = (Array.isArray(body?.result) ? body.result : []).flatMap((raw) => {
-        const lead = bitrixLead(raw);
-        return lead ? [lead] : [];
-      });
-      return { ok: true, detail: `Получено лидов: ${leads.length}`, status: res.status, leads };
+      // Этап 12: инкрементальный фильтр по дате изменения (ISO 8601) с минутным перекрытием;
+      // страница REST Bitrix24 фиксирована (50 записей), смещение следующей — из поля next ответа.
+      const fromIso = typeof cursorAt === "number" ? new Date(cursorAt - CURSOR_OVERLAP_MS).toISOString().slice(0, 19) : null;
+      const leads: ExternalLead[] = [];
+      let status = 200;
+      let start: number | null = null;
+      for (;;) {
+        const res = await fetchImpl(`${base}crm.lead.list.json`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            order: { ID: "DESC" },
+            ...(fromIso !== null ? { filter: { ">=DATE_MODIFY": fromIso } } : {}),
+            ...(start !== null ? { start } : {})
+          }),
+          signal: AbortSignal.timeout(TIMEOUT_MS)
+        });
+        status = res.status;
+        if (!res.ok) return { ok: false, detail: `Bitrix24 ответил HTTP ${res.status} при запросе лидов`, status: res.status };
+        const body = (await res.json().catch(() => null)) as { result?: unknown[]; next?: number } | null;
+        for (const raw of Array.isArray(body?.result) ? body.result : []) {
+          const lead = bitrixLead(raw);
+          if (lead) leads.push(lead);
+        }
+        const next = typeof body?.next === "number" ? body.next : null;
+        if (next === null) break; // поля next нет — выборка кончилась
+        if (leads.length >= SYNC_CEILING) {
+          // Потолок прогона: остальное — на следующие прогоны, курсор не сдвигается (решает исполнитель).
+          return { ok: true, detail: `Получено лидов: ${leads.length}`, status, leads, truncated: true };
+        }
+        start = next;
+      }
+      return { ok: true, detail: `Получено лидов: ${leads.length}`, status, leads };
     } catch (e) {
       return netError(e);
     }

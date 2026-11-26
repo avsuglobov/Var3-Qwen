@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { amocrmAdapter, adapterOf, bitrix24Adapter, demoAdapter, INTEGRATION_ADAPTERS, webhookAdapter } from "@/lib/integrations/adapters";
 import { amocrmLead, bitrixLead, externalLeadId, importExternalLeads } from "@/lib/integrations/import-map";
-import { maskSecret, readCredentials, saveCredentials, writeCredentials } from "@/lib/server/secrets";
+import { maskSecret, readCredentials, saveCredentials, saveSyncCursor, syncCursorOf, writeCredentials } from "@/lib/server/secrets";
 import { appendRun, readRuns } from "@/lib/server/runs";
 import { runIntegration } from "@/lib/server/integrations";
 import { amocrmAuthorizeCallback, amocrmAuthorizeStart } from "@/lib/server/oauth-amocrm";
@@ -131,7 +131,7 @@ describe("Bitrix24-адаптер — вебхук и методы REST", () => 
     const outcome = await bitrix24Adapter.sync({ webhookUrl: "https://b24-x.bitrix24.ru/rest/1/secretkey/" }, fetchImpl);
     expect(outcome.ok).toBe(true);
     expect(seen[0]).toBe("https://b24-x.bitrix24.ru/rest/1/secretkey/crm.lead.list.json");
-    expect(JSON.parse(seen[1])).toEqual({ order: { ID: "DESC" }, limit: 25 });
+    expect(JSON.parse(seen[1])).toEqual({ order: { ID: "DESC" } }); // страница REST фиксирована (50), пагинация — через start из поля next (этап 12)
     expect(outcome.detail).toBe("Получено лидов: 2");
     expect(outcome.leads).toEqual([
       { externalId: "11", name: "Заявка К", value: 1500.5 },
@@ -458,6 +458,118 @@ describe("OAuth-выдача по коду (этап 11)", () => {
     expect(result.ok).toBe(false);
     expect(result.message).toContain("не передал код");
     expect(count.n).toBe(0);
+  });
+});
+
+describe("инкрементальная синхронизация (этап 12): курсор, фильтр, пагинация", () => {
+  it("amoCRM: курсор → filter[updated_at][from] в адресе (unix-секунды с минутным перекрытием)", async () => {
+    const seen: string[] = [];
+    const fetchImpl = (async (url: RequestInfo) => {
+      seen.push(String(url));
+      return new Response(JSON.stringify({ _embedded: { leads: [] } }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const cursorAt = 1_700_000_000_000;
+    const outcome = await amocrmAdapter.sync({ subdomain: "company", accessToken: "amo-token" }, fetchImpl, cursorAt);
+    expect(outcome.ok).toBe(true);
+    const fromSec = Math.floor((cursorAt - 60_000) / 1000);
+    expect(String(seen[0])).toBe(`https://company.amocrm.ru/api/v4/leads?limit=25&page=1&filter[updated_at][from]=${fromSec}`);
+  });
+  it("amoCRM: пагинация по _links.next — три страницы собраны в один прогон (75 сделок)", async () => {
+    const seen: string[] = [];
+    const fetchImpl = (async (url: RequestInfo) => {
+      seen.push(String(url));
+      const n = Number(/page=(\d+)/.exec(String(url))?.[1] ?? 1);
+      return new Response(JSON.stringify({
+        _embedded: { leads: Array.from({ length: 25 }, (_, i) => ({ id: (n - 1) * 25 + i + 1, name: `Сделка ${(n - 1) * 25 + i + 1}`, price: 1000 })) },
+        ...(n < 3 ? { _links: { next: { href: `?limit=25&page=${n + 1}` } } } : {})
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const outcome = await amocrmAdapter.sync({ subdomain: "company", accessToken: "amo-token" }, fetchImpl);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.detail).toBe("Получено сделок: 75");
+    expect(outcome.truncated).toBeUndefined();
+    expect(outcome.leads).toHaveLength(75);
+    expect(outcome.leads?.[0]).toEqual({ externalId: "1", name: "Сделка 1", value: 1000 });
+    expect(outcome.leads?.[74]).toEqual({ externalId: "75", name: "Сделка 75", value: 1000 });
+    expect(seen).toHaveLength(3);
+    expect(String(seen[2])).toContain("page=3");
+  });
+  it("amoCRM: потолок 250 — одиннадцатая страница не запрашивается, адаптер помечает truncated", async () => {
+    const seen: string[] = [];
+    const fetchImpl = (async (url: RequestInfo) => {
+      seen.push(String(url));
+      return new Response(JSON.stringify({
+        _embedded: { leads: Array.from({ length: 25 }, (_, i) => ({ id: i + 1, name: "Сделка", price: null })) },
+        _links: { next: { href: "?limit=25&page=99" } }
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const outcome = await amocrmAdapter.sync({ subdomain: "company", accessToken: "amo-token" }, fetchImpl);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.leads).toHaveLength(250);
+    expect(outcome.truncated).toBe(true);
+    expect(seen).toHaveLength(10);
+  });
+  it("Bitrix24: курсор → «>=DATE_MODIFY» в теле (ISO 8601), смещение start из поля next", async () => {
+    const seen: string[] = [];
+    const fetchImpl = (async (_url: RequestInfo, init?: RequestInit) => {
+      const sent = JSON.parse(String(init?.body)) as { start?: number };
+      seen.push(String(init?.body));
+      return new Response(JSON.stringify({ result: [{ ID: "1", TITLE: "Заявка" }], ...(sent.start === undefined ? { next: 50 } : {}) }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const cursorAt = 1_700_000_000_000;
+    const outcome = await bitrix24Adapter.sync({ webhookUrl: "https://b24-x.bitrix24.ru/rest/1/secretkey/" }, fetchImpl, cursorAt);
+    expect(outcome.ok).toBe(true);
+    const fromIso = new Date(cursorAt - 60_000).toISOString().slice(0, 19);
+    expect(JSON.parse(seen[0])).toEqual({ order: { ID: "DESC" }, filter: { ">=DATE_MODIFY": fromIso } });
+    expect(JSON.parse(seen[1])).toEqual({ order: { ID: "DESC" }, filter: { ">=DATE_MODIFY": fromIso }, start: 50 });
+    expect(outcome.detail).toBe("Получено лидов: 2");
+  });
+  it("Bitrix24: потолок 250 при постоянном next — truncated, шестой страницы нет", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ result: Array.from({ length: 50 }, (_, i) => ({ ID: String(i + 1), TITLE: "Заявка" })), next: 999 }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const outcome = await bitrix24Adapter.sync({ webhookUrl: "https://b24-x.bitrix24.ru/rest/1/secretkey/" }, fetchImpl);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.leads).toHaveLength(250);
+    expect(outcome.truncated).toBe(true);
+    expect(calls).toBe(5);
+  });
+  it("исполнитель: успешный sync сдвигает курсор в secrets.json и помечает детали прогона", async () => {
+    expect(syncCursorOf("int-demo")).toBeNull();
+    const run = await runIntegration("int-demo", "sync");
+    expect(run.ok).toBe(true);
+    expect(run.detail).toContain("курсор синхронизации обновлён");
+    const at = syncCursorOf("int-demo");
+    expect(at).not.toBeNull();
+    expect(Math.abs((at ?? 0) - Date.now())).toBeLessThan(10_000);
+  });
+  it("исполнитель: курсор передаётся адаптеру (amoCRM), полный прогон сдвигает его", async () => {
+    saveCredentials("int-amocrm", { subdomain: "company", accessToken: "amo-token" });
+    saveSyncCursor("int-amocrm", 1_700_000_000_000);
+    const seen: string[] = [];
+    const fetchImpl = (async (url: RequestInfo) => {
+      seen.push(String(url));
+      return new Response(JSON.stringify({ _embedded: { leads: [{ id: 9, name: "Сделка И", price: 500 }] } }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const run = await runIntegration("int-amocrm", "sync", fetchImpl);
+    expect(run.ok).toBe(true);
+    expect(String(seen[0])).toContain(`filter[updated_at][from]=${Math.floor((1_700_000_000_000 - 60_000) / 1000)}`);
+    expect(syncCursorOf("int-amocrm")).toBeGreaterThan(1_700_000_000_000);
+    expect(run.detail).toContain("курсор синхронизации обновлён");
+  });
+  it("исполнитель: обрезанный потолком прогон оставляет курсор на месте", async () => {
+    saveCredentials("int-amocrm", { subdomain: "company", accessToken: "amo-token" });
+    saveSyncCursor("int-amocrm", 1_700_000_000_000);
+    const fetchImpl = (async () => new Response(JSON.stringify({
+      _embedded: { leads: Array.from({ length: 25 }, (_, i) => ({ id: i + 1, name: "Сделка", price: null })) },
+      _links: { next: { href: "?limit=25&page=99" } }
+    }), { status: 200 })) as unknown as typeof fetch;
+    const run = await runIntegration("int-amocrm", "sync", fetchImpl);
+    expect(run.ok).toBe(true);
+    expect(run.detail).toContain("курсор не сдвинут");
+    expect(syncCursorOf("int-amocrm")).toBe(1_700_000_000_000);
   });
 });
 
