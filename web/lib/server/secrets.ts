@@ -6,7 +6,8 @@ import { credentialsFileSchema, type CredentialsFile } from "@/lib/integrations/
  * Хранилище ключей внешних сервисов (этап 8): файл `.data/secrets.json` рядом со снимком,
  * но вне его — ключи не попадают в экспорт данных, в снимок и в клиент. Запись атомарная
  * (tmp + rename, права 0600); чтение — каждый раз с диска без кеша: e2e удаляет файл между
- * шагами, а dev-сервер переживает ручные правки.
+ * шагами, а dev-сервер переживает ручные правки. Этап 12: рядом с ключами лежат курсоры
+ * инкрементальной синхронизации — момент последнего успешного полного прогона по интеграции.
  */
 
 const SECRETS_FILE = "secrets.json";
@@ -43,6 +44,18 @@ export function credentialsOf(integrationId: string): { fields: Record<string, s
 export function saveCredentials(integrationId: string, fields: Record<string, string>): void {
   const file = readCredentials();
   file.credentials[integrationId] = { fields, updatedAt: Date.now() };
+  writeCredentials(file);
+}
+
+/** Курсор синхронизации интеграции (мс с эпохи); null — успешного полного прогона ещё не было. */
+export function syncCursorOf(integrationId: string): number | null {
+  return readCredentials().syncCursor?.[integrationId]?.at ?? null;
+}
+
+/** Сохраняет курсор инкрементальной синхронизации — только после успешного полного прогона (этап 12). */
+export function saveSyncCursor(integrationId: string, at: number): void {
+  const file = readCredentials();
+  file.syncCursor = { ...file.syncCursor, [integrationId]: { at } };
   writeCredentials(file);
 }
 
