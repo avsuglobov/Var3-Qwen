@@ -4,9 +4,10 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { amocrmAdapter, adapterOf, bitrix24Adapter, demoAdapter, INTEGRATION_ADAPTERS, webhookAdapter } from "@/lib/integrations/adapters";
 import { amocrmLead, bitrixLead, externalLeadId, importExternalLeads } from "@/lib/integrations/import-map";
-import { maskSecret, readCredentials, saveCredentials } from "@/lib/server/secrets";
+import { maskSecret, readCredentials, saveCredentials, writeCredentials } from "@/lib/server/secrets";
 import { appendRun, readRuns } from "@/lib/server/runs";
 import { runIntegration } from "@/lib/server/integrations";
+import { amocrmAuthorizeCallback, amocrmAuthorizeStart } from "@/lib/server/oauth-amocrm";
 import { createLocalApi, createMemoryStorage } from "@/lib/api";
 
 /* Этапы 8–9 — слой внешних интеграций: адаптеры с подставленным fetch (сеть не нужна),
@@ -333,6 +334,130 @@ describe("OAuth-обновление токена amoCRM (этап 10)", () => {
     expect(saved.accessToken).toBe("fresh-at-9999");
     expect(saved.refreshToken).toBe("fresh-rt-7777");
     expect(saved.clientId).toBe("cid-1");
+  });
+});
+
+describe("OAuth-выдача по коду (этап 11)", () => {
+  const savedPair = (): void => {
+    saveCredentials("int-amocrm", { subdomain: "company", clientId: "cid-1", clientSecret: "csecret-1" });
+  };
+  const countingFetch = async (count: { n: number }, status = 200, body: unknown = {}): Promise<typeof fetch> => {
+    count.n = 0;
+    return (async () => {
+      count.n += 1;
+      return new Response(JSON.stringify(body), { status });
+    }) as unknown as typeof fetch;
+  };
+
+  it("start без сохранённых clientId/секретного ключа: отказ и без state в secrets.json", () => {
+    expect(() => amocrmAuthorizeStart()).toThrow("Сначала сохраните clientId");
+    expect(readCredentials().pending?.["int-amocrm"]).toBeUndefined();
+  });
+  it("start: адрес app.amocrm.ru/oauth с client_id, mode=redirect и одноразовым state", () => {
+    savedPair();
+    const { authorizeUrl } = amocrmAuthorizeStart();
+    const url = new URL(authorizeUrl);
+    expect(`${url.protocol}//${url.host}${url.pathname}`).toBe("https://app.amocrm.ru/oauth");
+    expect(url.searchParams.get("client_id")).toBe("cid-1");
+    expect(url.searchParams.get("mode")).toBe("redirect");
+    const state = url.searchParams.get("state") ?? "";
+    expect(state).toMatch(/^[0-9a-f]{32}$/);
+    expect(readCredentials().pending?.["int-amocrm"]?.state).toBe(state);
+  });
+  it("повторный start перезаписывает state: старая ссылка входа не подойдёт", () => {
+    savedPair();
+    const first = amocrmAuthorizeStart().authorizeUrl;
+    const second = amocrmAuthorizeStart().authorizeUrl;
+    expect(first).not.toBe(second);
+  });
+  it("callback: код обменивается на токены (authorization_code), ключи сохраняются, state очищается", async () => {
+    savedPair();
+    const state = new URL(amocrmAuthorizeStart().authorizeUrl).searchParams.get("state");
+    const seen: { url: string; init?: RequestInit }[] = [];
+    const fetchImpl = (async (url: RequestInfo, init?: RequestInit) => {
+      seen.push({ url: String(url), init });
+      return new Response(JSON.stringify({ access_token: "at-code-9", refresh_token: "rt-code-9" }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const result = await amocrmAuthorizeCallback({ code: "auth-code-7", state, origin: "https://app.example" }, fetchImpl);
+    expect(result.ok).toBe(true);
+    expect(seen.length).toBe(1);
+    expect(JSON.parse(String(seen[0]?.init?.body))).toEqual({
+      client_id: "cid-1",
+      client_secret: "csecret-1",
+      grant_type: "authorization_code",
+      code: "auth-code-7",
+      redirect_uri: "https://app.example/api/integrations/amocrm/callback"
+    });
+    const fields = readCredentials().credentials["int-amocrm"].fields;
+    expect(fields.accessToken).toBe("at-code-9");
+    expect(fields.refreshToken).toBe("rt-code-9");
+    expect(fields.clientId).toBe("cid-1");
+    expect(fields.subdomain).toBe("company");
+    expect(readCredentials().pending?.["int-amocrm"]).toBeUndefined();
+  });
+  it("callback с чужим state: отказ до сети, ключи не тронуты", async () => {
+    savedPair();
+    amocrmAuthorizeStart();
+    const count = { n: 0 };
+    const fetchImpl = await countingFetch(count);
+    const result = await amocrmAuthorizeCallback({ code: "auth-code-7", state: "wrong-wrong-wrong", origin: "https://app.example" }, fetchImpl);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("state не совпал");
+    expect(count.n).toBe(0);
+    expect(readCredentials().credentials["int-amocrm"].fields.accessToken).toBeUndefined();
+  });
+  it("callback без начатого входа: отказ до сети", async () => {
+    savedPair();
+    const count = { n: 0 };
+    const fetchImpl = await countingFetch(count);
+    const result = await amocrmAuthorizeCallback({ code: "auth-code-7", state: null, origin: "https://app.example" }, fetchImpl);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("Вход не начинался");
+    expect(count.n).toBe(0);
+  });
+  it("callback спустя 30 минут: ссылка устарела, state очищен, сеть не трогается", async () => {
+    savedPair();
+    amocrmAuthorizeStart();
+    const file = readCredentials();
+    const pending = file.pending?.["int-amocrm"];
+    file.pending = { "int-amocrm": { state: pending?.state ?? "", createdAt: Date.now() - 31 * 60_000 } };
+    writeCredentials(file);
+    const count = { n: 0 };
+    const fetchImpl = await countingFetch(count);
+    const result = await amocrmAuthorizeCallback({ code: "auth-code-7", state: pending?.state ?? "", origin: "https://app.example" }, fetchImpl);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("устарела");
+    expect(count.n).toBe(0);
+    expect(readCredentials().pending?.["int-amocrm"]).toBeUndefined();
+  });
+  it("callback: amoCRM отклонил код (HTTP 401) — честный отказ, ключи и state не тронуты", async () => {
+    savedPair();
+    const state = new URL(amocrmAuthorizeStart().authorizeUrl).searchParams.get("state");
+    const fetchImpl = await countingFetch({ n: 0 }, 401);
+    const result = await amocrmAuthorizeCallback({ code: "auth-code-7", state, origin: "https://app.example" }, fetchImpl);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("HTTP 401");
+    expect(readCredentials().credentials["int-amocrm"].fields.accessToken).toBeUndefined();
+    expect(readCredentials().pending?.["int-amocrm"]?.state).toBe(state);
+  });
+  it("callback: ответ без access_token — отказ", async () => {
+    savedPair();
+    const state = new URL(amocrmAuthorizeStart().authorizeUrl).searchParams.get("state");
+    const fetchImpl = await countingFetch({ n: 0 }, 200, { refresh_token: "only-rt" });
+    const result = await amocrmAuthorizeCallback({ code: "auth-code-7", state, origin: "https://app.example" }, fetchImpl);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("без access_token");
+    expect(readCredentials().credentials["int-amocrm"].fields.accessToken).toBeUndefined();
+  });
+  it("callback без кода: отказ до сети", async () => {
+    savedPair();
+    amocrmAuthorizeStart();
+    const count = { n: 0 };
+    const fetchImpl = await countingFetch(count);
+    const result = await amocrmAuthorizeCallback({ code: null, state: null, origin: "https://app.example" }, fetchImpl);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("не передал код");
+    expect(count.n).toBe(0);
   });
 });
 

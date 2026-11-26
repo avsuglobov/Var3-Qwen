@@ -61,6 +61,12 @@ export const integrationRunSchema = z.object({
 });
 export type IntegrationRun = z.infer<typeof integrationRunSchema>;
 
+/** Состояние входа через OAuth (этап 11): одноразовый state и время старта; лежит рядом с ключами. */
+export const oauthPendingSchema = z.object({
+  state: z.string().min(16).max(128),
+  createdAt: z.number().int().positive()
+});
+
 /** Содержимое файла секретов: ключи не попадают в снимок, экспорт данных и клиент. */
 export const credentialsFileSchema = z.object({
   version: z.literal(1),
@@ -68,7 +74,9 @@ export const credentialsFileSchema = z.object({
     /** Только ключи, определённые адаптером этой интеграции (проверяется маршрутом при записи). */
     fields: z.record(z.string().max(100), z.string().max(2000)),
     updatedAt: z.number().int()
-  }))
+  })),
+  /** Незавершённые входы через OAuth (этап 11): по интеграции — одноразовый state. */
+  pending: z.record(z.string().max(40), oauthPendingSchema).optional()
 });
 export type CredentialsFile = z.infer<typeof credentialsFileSchema>;
 

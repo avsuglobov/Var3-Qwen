@@ -36,12 +36,36 @@ async function call(url: string, init: RequestInit, fetchImpl: typeof fetch): Pr
 
 const AMOCRM_SUBDOMAIN_RE = /^[a-z0-9][a-z0-9-]{0,62}$/i;
 
+const AMOCRM_TOKEN_URL = "https://app.amocrm.ru/oauth2/access_token";
+
+/**
+ * Общий запрос токена amoCRM (этапы 10–11): обновление по refresh-токену и выдача по коду
+ * авторизации идут на один эндпоинт и отличаются только grant_type. Итог — токены либо
+ * готовый неуспешный outcome; тексты ошибок не содержат секретов, только HTTP-статус.
+ */
+export async function amocrmTokenRequest(action: string, payload: Record<string, string>, fetchImpl: typeof fetch): Promise<{ ok: true; accessToken: string; refreshToken?: string } | IntegrationRunOutcome> {
+  try {
+    const res = await fetchImpl(AMOCRM_TOKEN_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    });
+    if (!res.ok) return { ok: false, detail: `amoCRM не смог ${action} (HTTP ${res.status})`, status: res.status };
+    const body = (await res.json().catch(() => null)) as { access_token?: string; refresh_token?: string } | null;
+    if (!body?.access_token) return { ok: false, detail: "amoCRM ответил без access_token", status: res.status };
+    return { ok: true, accessToken: body.access_token, refreshToken: body.refresh_token };
+  } catch (e) {
+    return netError(e);
+  }
+}
+
 /**
  * Авторизация amoCRM (этап 10): долгоживущий токен или OAuth-тройка (ID интеграции,
- * секретный ключ, refresh-токен). При OAuth — POST https://app.amocrm.ru/oauth2/access_token
- * с grant_type=refresh_token; свежие токены возвращаются в rotate — исполнитель сохранит их
- * в .data/secrets.json (amoCRM сменяет refresh-токен при каждом выпуске доступа).
- * Итог — либо готовый токен, либо готовый неуспешный outcome.
+ * секретный ключ, refresh-токен). При OAuth — запрос свежего токена перед каждым прогоном;
+ * новые токены возвращаются в rotate — исполнитель сохранит их в .data/secrets.json
+ * (amoCRM сменяет refresh-токен при каждом выпуске доступа). Итог — либо готовый токен,
+ * либо готовый неуспешный outcome.
  */
 type AmoAuth = { token: string; rotate?: Record<string, string> };
 
@@ -54,20 +78,9 @@ async function amocrmAuth(creds: Record<string, string>, fetchImpl: typeof fetch
   if (!clientId || !clientSecret || !refreshToken) {
     return configError("Не задан токен доступа amoCRM и не заполнена OAuth-тройка (ID интеграции, секретный ключ, refresh-токен) — заполните либо токен, либо все три поля");
   }
-  try {
-    const res = await fetchImpl("https://app.amocrm.ru/oauth2/access_token", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, grant_type: "refresh_token", refresh_token: refreshToken }),
-      signal: AbortSignal.timeout(TIMEOUT_MS)
-    });
-    if (!res.ok) return { ok: false, detail: `amoCRM не смог обновить токен (HTTP ${res.status}) — проверьте OAuth-поля`, status: res.status };
-    const body = (await res.json().catch(() => null)) as { access_token?: string; refresh_token?: string } | null;
-    if (!body?.access_token) return { ok: false, detail: "amoCRM ответил на обновление токена без access_token", status: res.status };
-    return { token: body.access_token, rotate: { accessToken: body.access_token, refreshToken: body.refresh_token ?? refreshToken } };
-  } catch (e) {
-    return netError(e);
-  }
+  const issued = await amocrmTokenRequest("обновить токен", { client_id: clientId, client_secret: clientSecret, grant_type: "refresh_token", refresh_token: refreshToken }, fetchImpl);
+  if (!("accessToken" in issued)) return issued;
+  return { token: issued.accessToken, rotate: { accessToken: issued.accessToken, refreshToken: issued.refreshToken ?? refreshToken } };
 }
 
 /** amoCRM (int-amocrm): API v4; авторизация — долгоживущий токен либо OAuth с автообновлением. */
