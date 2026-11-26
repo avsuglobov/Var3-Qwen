@@ -2,6 +2,7 @@ import { ApiError } from "@/lib/api/types";
 import { adapterOf } from "@/lib/integrations/adapters";
 import { errorResponse, readJsonBody } from "@/lib/server/store";
 import { credentialsOf, maskSecret, saveCredentials } from "@/lib/server/secrets";
+import { guardApi } from "@/lib/server/auth";
 
 /**
  * Ключи внешних сервисов (этап 8). Ключи хранятся в .data/secrets.json и не отдаются
@@ -17,6 +18,8 @@ function requireIntegrationId(req: Request): string {
 
 /** GET /api/integrations/credentials?integrationId=… — поля адаптера с масками секретов. */
 export async function GET(req: Request) {
+  const denied = guardApi(req);
+  if (denied) return denied;
   try {
     const integrationId = requireIntegrationId(req);
     const adapter = adapterOf(integrationId);
@@ -45,6 +48,8 @@ export async function GET(req: Request) {
 
 /** PUT /api/integrations/credentials — сохраняет набор полей: { integrationId, fields }. */
 export async function PUT(req: Request) {
+  const denied = guardApi(req);
+  if (denied) return denied;
   try {
     const body = (await readJsonBody(req)) as { integrationId?: unknown; fields?: unknown };
     if (typeof body.integrationId !== "string" || body.integrationId.length === 0 || body.integrationId.length > 40) {

@@ -1,11 +1,14 @@
 import type { CollectionName, ItemOf } from "@/lib/schemas";
 import { errorResponse, readJsonBody } from "@/lib/server/store";
 import { repoOf } from "@/lib/server/routes";
+import { guardApi } from "@/lib/server/auth";
 
 type Ctx = { params: Promise<{ collection: string }> };
 
 /** GET /api/collections/[collection] — список записей коллекции. */
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(req: Request, ctx: Ctx) {
+  const denied = guardApi(req);
+  if (denied) return denied;
   try {
     const { collection } = await ctx.params;
     return Response.json(await repoOf(collection).list());
@@ -16,6 +19,8 @@ export async function GET(_req: Request, ctx: Ctx) {
 
 /** POST /api/collections/[collection] — создание записи (201); схема коллекции проверяется движком. */
 export async function POST(req: Request, ctx: Ctx) {
+  const denied = guardApi(req);
+  if (denied) return denied;
   try {
     const { collection } = await ctx.params;
     const item = await readJsonBody(req);

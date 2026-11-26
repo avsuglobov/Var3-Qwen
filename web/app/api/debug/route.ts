@@ -1,15 +1,20 @@
 import { errorResponse, getServerStore, readJsonBody } from "@/lib/server/store";
+import { guardApi } from "@/lib/server/auth";
 
 /**
  * Панель сбоев для e2e и демонстрации настоящих сетевых состояний (этап 4).
  * GET — текущие сбои; POST — переключить: fail (все ответы 503), latencyMs (задержка ответов),
  * corrupt (записать в хранилище битый снимок — приложение восстановит демо-данные).
  */
-export async function GET() {
+export async function GET(req: Request) {
+  const denied = guardApi(req);
+  if (denied) return denied;
   return Response.json(getServerStore().getFaults());
 }
 
 export async function POST(req: Request) {
+  const denied = guardApi(req);
+  if (denied) return denied;
   try {
     const body = (await readJsonBody(req)) as { fail?: unknown; latencyMs?: unknown; corrupt?: unknown };
     const store = getServerStore();

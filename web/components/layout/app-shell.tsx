@@ -7,6 +7,7 @@ import { CommandPalette } from "@/components/layout/command-palette";
 import { Grain } from "@/components/layout/grain";
 import { SidebarNav } from "@/components/layout/sidebar-nav";
 import { Topbar } from "@/components/layout/topbar";
+import { AuthGate } from "@/components/system/auth-gate";
 import { TRIAL_DAYS } from "@/lib/config";
 import { ru } from "@/lib/i18n/ru";
 import { UiStoreProvider, useUi } from "@/lib/stores/ui-store";
@@ -71,6 +72,7 @@ function Shell({ children }: { children: ReactNode }) {
 
       <CommandPalette />
       <Grain />
+      <AuthGate />
     </div>
   );
 }

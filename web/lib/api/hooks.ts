@@ -28,7 +28,8 @@ export const qk = {
   companyProfile: ["companyProfile"] as const,
   courses: ["courses"] as const,
   certificates: ["certificates"] as const,
-  integrationRuns: ["integrationRuns"] as const
+  integrationRuns: ["integrationRuns"] as const,
+  authStatus: ["authStatus"] as const
 };
 
 export const useLeads = () => useQuery({ queryKey: qk.leads, queryFn: () => getApi().leads.list() });
@@ -405,5 +406,59 @@ export function useSetAutoSync() {
 export function useAmocrmAuthorize() {
   return useMutation({
     mutationFn: () => integrationFetch<{ authorizeUrl: string }>("/api/integrations/amocrm/authorize", { method: "POST" })
+  });
+}
+
+/* ------------------------------------------------------------ Защита API (этап 15) */
+
+/** Состояние защиты (открытый маршрут /api/auth/status): задан ли PIN и разблокировано ли приложение. */
+export interface AuthStatus {
+  setup: boolean;
+  unlocked: boolean;
+}
+
+/** Ошибка «Требуется вход…» — сигнал, что сессии нет/истекла и нужен экран разблокировки. */
+export const isAuthError = (e: unknown): boolean => e instanceof Error && e.message.startsWith("Требуется вход");
+
+/** JSON-запрос к /api/auth/*: same-origin fetch несёт куку сессии автоматически. */
+async function authFetch<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, { headers: { "content-type": "application/json" }, ...init });
+  const body: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = (body as { message?: string } | null)?.message;
+    throw new Error(message ?? `Запрос к ${url} не удался (HTTP ${res.status})`);
+  }
+  return body as T;
+}
+
+/** Состояние защиты; опрашивается при старте — экран разблокировки закрывает приложение. */
+export const useAuthStatus = () => useQuery({ queryKey: qk.authStatus, queryFn: () => authFetch<AuthStatus>("/api/auth/status") });
+
+/** Первичное задание PIN (только пока PIN не задан): 200 — кука сессии установлена. */
+export function useSetupPin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ pin, pin2 }: { pin: string; pin2: string }) =>
+      authFetch<{ ok: boolean }>("/api/auth/setup", { method: "POST", body: JSON.stringify({ pin, pin2 }) }),
+    onSuccess: () => void qc.invalidateQueries() // весь кэш: данные перечитываются уже под сессией
+  });
+}
+
+/** Разблокировка по PIN: 200 — кука сессии установлена. */
+export function useLoginPin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ pin }: { pin: string }) =>
+      authFetch<{ ok: boolean }>("/api/auth/login", { method: "POST", body: JSON.stringify({ pin }) }),
+    onSuccess: () => void qc.invalidateQueries()
+  });
+}
+
+/** Заблокировать: сессия удаляется на сервере, приложение закрывается экраном входа. */
+export function useLogout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => authFetch<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+    onSuccess: () => void qc.invalidateQueries()
   });
 }

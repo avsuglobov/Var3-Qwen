@@ -1,5 +1,6 @@
 import { errorResponse, readJsonBody } from "@/lib/server/store";
 import { runIntegration } from "@/lib/server/integrations";
+import { guardApi } from "@/lib/server/auth";
 
 /**
  * POST /api/integrations/check — проверка связи с внешним сервисом (этап 8).
@@ -8,6 +9,8 @@ import { runIntegration } from "@/lib/server/integrations";
  * 4xx означает, что прогон не состоялся (нет адаптера, не заданы ключи, битое тело).
  */
 export async function POST(req: Request) {
+  const denied = guardApi(req);
+  if (denied) return denied;
   try {
     const body = (await readJsonBody(req)) as { integrationId?: unknown };
     if (typeof body.integrationId !== "string" || body.integrationId.length === 0 || body.integrationId.length > 40) {
