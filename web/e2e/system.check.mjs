@@ -13,7 +13,10 @@
    выбор и сохранение в профиле с перезагрузкой (этап 7), вкладка «Данные»: экспорт файла
    (валидный JSON версии 1), импорт с обратной связью, битый файл → ошибка, сброс к демо.
    Помощь: карточка поддержки, чат обучения с ответом по сценарию («Помощь печатает…»),
-   Enter отправляет, пустое — нет. Overflow 375…1920 × 2 темы, контраст AA, внешние запросы, консоль.
+   Enter отправляет, пустое — нет. Этап 16: /api/ai/status (без блока ai — не настроен,
+   с блоком — configured и ключ только маской), /api/ai/reply (scripted-fallback с пометкой
+   «не LLM», недоступный провайдер — честная 503 unavailable, после удаления блока — снова демо).
+   Overflow 375…1920 × 2 темы, контраст AA, внешние запросы, консоль.
    Запуск: npm run build && node e2e/system.check.mjs */
 import fs from "node:fs";
 import os from "node:os";
@@ -328,6 +331,22 @@ async function main() {
     fs.rmSync(".data/secrets.json", { force: true }); // сброс PIN: не оставлять блокировку следующим наборам (a11y)
     const stReset = await fetch(BASE + "/api/auth/status").then((r) => r.json());
     check("этап 15: сброс secrets.json возвращает открытый режим (совместимость наборов e2e)", stReset.setup === false && stReset.unlocked === true);
+
+    // этап 16: AI-маршруты — без блока ai честный scripted-fallback; недоступный провайдер — честная 503; ключ только маской
+    const stAi0 = await fetch(BASE + "/api/ai/status").then((r) => r.json());
+    check("этап 16: /api/ai/status без блока ai — провайдер не настроен", stAi0.configured === false && stAi0.apiKeyMask === null);
+    const repAi0 = await fetch(BASE + "/api/ai/reply", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "boss", message: "какая цена тарифа?" }) }).then((r) => r.json());
+    check("этап 16: /api/ai/reply без провайдера — демо-ответ с пометкой «не LLM»", repAi0.source === "scripted" && /демо/.test(repAi0.note) && /не LLM/.test(repAi0.note));
+    fs.mkdirSync(path.join(process.cwd(), ".data"), { recursive: true });
+    fs.writeFileSync(path.join(process.cwd(), ".data", "secrets.json"), JSON.stringify({ version: 1, credentials: {}, ai: { provider: "openai", baseUrl: "http://127.0.0.1:9/v1", apiKey: "test-key-1234567890", model: "test-model" } }), { mode: 0o600 });
+    const stAi1 = await fetch(BASE + "/api/ai/status").then((r) => r.json());
+    check("этап 16: статус с провайдером — configured true, ключ уходит только маской", stAi1.configured === true && stAi1.provider === "openai" && stAi1.apiKeyMask === "••••7890" && !JSON.stringify(stAi1).includes("test-key"));
+    const repFail = await fetch(BASE + "/api/ai/reply", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "boss", message: "какая цена тарифа?" }) });
+    const repFailBody = await repFail.json();
+    check("этап 16: недоступный LLM — 503 unavailable с честной причиной, демо-подмены нет", repFail.status === 503 && repFailBody.code === "unavailable" && /недоступен/.test(repFailBody.message));
+    fs.rmSync(path.join(process.cwd(), ".data", "secrets.json"), { force: true }); // возврат к открытому режиму для остальных наборов
+    const repAi2 = await fetch(BASE + "/api/ai/reply", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "boss", message: "какая цена тарифа?" }) }).then((r) => r.json());
+    check("этап 16: после удаления блока ai снова демо-режим", repAi2.source === "scripted");
 
     check("нет внешних запросов", [...hosts].every((h) => /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(h)), [...hosts].join(","));
     check("консоль: нет ошибок и предупреждений (hydration, React)" + (problems.length ? " [" + problems.slice(0, 3).join(" | ") + "]" : ""), problems.length === 0);

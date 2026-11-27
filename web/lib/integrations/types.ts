@@ -101,6 +101,19 @@ export const authBlockSchema = z.object({
 });
 export type AuthBlock = z.infer<typeof authBlockSchema>;
 
+/** Этап 16: настройки LLM-провайдера AI-сотрудников; блока нет — отвечает scripted-fallback (демо). */
+export const aiBlockSchema = z.object({
+  /** Какой адаптер использовать: SDK z-ai-web-dev-sdk ("zai") или OpenAI-совместимая точка ("openai"). */
+  provider: z.enum(["zai", "openai"]),
+  /** Ключ провайдера; в браузер уходит только маска maskSecret(), полное значение не покидает сервер. */
+  apiKey: z.string().max(2000).optional(),
+  /** Базовый адрес OpenAI-совместимой точки (например, https://api.example.com/v1). */
+  baseUrl: z.string().max(500).optional(),
+  /** Имя модели; не задано — используется дефолт провайдера. */
+  model: z.string().max(120).optional()
+});
+export type AiBlock = z.infer<typeof aiBlockSchema>;
+
 /** Содержимое файла секретов: ключи не попадают в снимок, экспорт данных и клиент. */
 export const credentialsFileSchema = z.object({
   version: z.literal(1),
@@ -116,7 +129,9 @@ export const credentialsFileSchema = z.object({
   /** Тумблер авто-синхронизации (этап 14): по интеграции — включена ли автосинхронизация (записи нет — включена). */
   autoSync: z.record(z.string().max(40), autoSyncStateSchema).optional(),
   /** Защита API (этап 15): PIN-хэш и активные сессии; блока нет — PIN не задан, API открыт. */
-  auth: authBlockSchema.optional()
+  auth: authBlockSchema.optional(),
+  /** LLM-провайдер AI-сотрудников (этап 16): ключ вне снимка, экспорта и клиента; блока нет — демо-ответы. */
+  ai: aiBlockSchema.optional()
 });
 export type CredentialsFile = z.infer<typeof credentialsFileSchema>;
 

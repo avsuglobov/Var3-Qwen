@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { credentialsFileSchema, type AuthBlock, type CredentialsFile } from "@/lib/integrations/types";
+import { credentialsFileSchema, type AiBlock, type AuthBlock, type CredentialsFile } from "@/lib/integrations/types";
 
 /**
  * Хранилище ключей внешних сервисов (этап 8): файл `.data/secrets.json` рядом со снимком,
@@ -74,6 +74,14 @@ export function saveAutoSync(integrationId: string, enabled: boolean): void {
 /** Блок защиты API (этап 15); null — PIN ещё не задан, API открыт для первичной настройки. */
 export function readAuthBlock(): AuthBlock | null {
   return readCredentials().auth ?? null;
+}
+
+/**
+ * Блок настроек LLM-провайдера (этап 16); null — провайдер не настроен, маршруты /api/ai/*
+ * отвечают scripted-fallback с пометкой «демо-ответ». Ключ никогда не уходит в браузер целиком.
+ */
+export function readAiBlock(): AiBlock | null {
+  return readCredentials().ai ?? null;
 }
 
 /** Атомарно сохраняет блок защиты (PIN-хэш и сессии) в secrets.json. */

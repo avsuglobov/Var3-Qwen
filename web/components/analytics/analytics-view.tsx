@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/state";
-import { scriptedReply } from "@/lib/scripted-reply";
+import { requestAiReply } from "@/lib/ai-client";
 import { DIALOG_REVIEW, analyticsKpis, reviewIsOk } from "@/lib/selectors/analytics";
 import { nowHM } from "@/lib/selectors/dialogs";
 import { useConversations, useLeads } from "@/lib/api/hooks";
@@ -22,9 +22,11 @@ interface ChatMsg {
 /**
  * Раздел «Аналитика» (этап 3, группа 7) — поведение analytics() прототипа: таблица разбора
  * диалогов менеджеров (ОК/Нарушение, демо-выборка — помечена «Демо»), чат «Вопрос
- * руководителю» с ответом по сценарию (scriptedReply, как bindChat прототипа).
- * Этап 7: KPI пересчитываются из данных приложения по правилам согласования
- * (analyticsKpis), кнопка «Пересчитать» обновляет данные и показывает время пересчёта.
+ * руководителю» (bindChat прототипа). Этап 7: KPI пересчитываются из данных приложения
+ * по правилам согласования (analyticsKpis), кнопка «Пересчитать» обновляет данные и
+ * показывает время пересчёта. Этап 16: ответы чата идут через серверный маршрут /api/ai/reply —
+ * при настроенном провайдере отвечает LLM (метка модели), без него — честный демо-ответ
+ * с пометкой «демо», при сбое провайдера — честная ошибка без подмены.
  */
 export function AnalyticsView() {
   const leadsQ = useLeads();
@@ -37,14 +39,12 @@ export function AnalyticsView() {
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Лента прокручена к последнему сообщению (как chat-scroll прототипа)
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, typing]);
-  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
   const loading = leadsQ.isPending || convsQ.isPending;
   const dataError = leadsQ.isError ? leadsQ.error : convsQ.isError ? convsQ.error : null;
@@ -63,10 +63,21 @@ export function AnalyticsView() {
     setMessages((prev) => [...prev, { from: "human", text, meta: "Вы" }]);
     setValue("");
     setTyping(true);
-    timerRef.current = setTimeout(() => {
-      setTyping(false);
-      setMessages((prev) => [...prev, { from: "ai", text: scriptedReply(text), meta: "AI-РОП" }]);
-    }, 900);
+    requestAiReply({ scope: "boss", message: text })
+      .then((r) => {
+        setTyping(false);
+        setMessages((prev) => [
+          ...prev,
+          { from: "ai", text: r.text, meta: r.source === "llm" ? `AI-РОП · ${r.model ?? r.provider ?? "LLM"}` : "AI-РОП · демо" }
+        ]);
+      })
+      .catch((e: Error) => {
+        setTyping(false);
+        setMessages((prev) => [
+          ...prev,
+          { from: "ai", text: e.message || "Сервис ИИ недоступен — попробуйте ещё раз.", meta: "AI-РОП · ошибка" }
+        ]);
+      });
   };
 
   if (loading) {
