@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import Database from "better-sqlite3";
 
 export const ROOT = path.resolve(__dirname, "..");
 export const read = (rel: string): string => fs.readFileSync(path.join(ROOT, rel), "utf8");
@@ -41,4 +42,17 @@ export function contrast(a: string, b: string): number {
   };
   const [x, y] = [lum(a), lum(b)];
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+
+/** Сырое содержимое backend под ключом снимка (этап 17, без гидрации вложений): db.json — у файлового драйвера, kv-таблица — у SQLite. */
+export function rawStoredValue(dir: string, driver: "file" | "sqlite"): string {
+  if (driver === "file") {
+    return (JSON.parse(fs.readFileSync(path.join(dir, "db.json"), "utf8")) as Record<string, string>)["aiws-db-v2"] as string;
+  }
+  const db = new Database(path.join(dir, "db.sqlite3"), { readonly: true });
+  try {
+    return (db.prepare("SELECT value FROM kv WHERE key = ?").get("aiws-db-v2") as { value: string }).value;
+  } finally {
+    db.close();
+  }
 }
