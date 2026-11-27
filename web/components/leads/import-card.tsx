@@ -89,7 +89,7 @@ export function ImportCard(props: ImportCardProps) {
         >
           <Upload className="size-7 text-muted-foreground" aria-hidden />
           <div className="text-sm font-medium">Перетащите файл .xlsx или .csv сюда</div>
-          <div className="text-[13px] text-muted-foreground">{DROP_HINT}</div>
+          <div className="text-[13px] text-muted-foreground-strong">{DROP_HINT}</div>
           <Button type="button" variant="secondary" size="sm" className="mt-2" onClick={handlePick} data-testid="leads-pick-file">
             <Download className="size-3.5" aria-hidden />
             Выбрать файл

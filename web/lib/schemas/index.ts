@@ -51,7 +51,7 @@ export const leadSchema = z.object({
 /** Лимиты: не больше трёх файлов на сообщение, каждый — до 1 МБ (содержимое хранится в снимке в base64). */
 export const MAX_MESSAGE_ATTACHMENTS = 3;
 export const MAX_ATTACHMENT_BYTES = 1_048_576;
-/** Граница поля data в снимке: base64 раздувает файл на ~⅓ (1 МБ → ~1,37 млн знаков) — с запасом до 1,5 млн. */
+/** Граница поля data: base64 раздувает полезную нагрузку на ~⅓ (1 МБ → ~1,37 млн знаков) — с запасом до 1,5 млн. С этапа 17 в сохранённом снимке на месте data — ссылка `blob:<sha256>` (серверное хранилище), наружу через REST отдаётся прежний base64. */
 export const MAX_ATTACHMENT_DATA = 1_500_000;
 
 export const attachmentSchema = z.object({
@@ -59,7 +59,7 @@ export const attachmentSchema = z.object({
   name: z.string().min(1).max(300),
   size: z.number().int().min(1).max(MAX_ATTACHMENT_BYTES),
   mime: optText,
-  /** Содержимое файла в base64; в демо-сидах вложений нет — поле необязательное. */
+  /** Содержимое файла в base64 (в демо-сидах вложений нет — поле необязательное); в сериализованном снимке вместо него ссылка `blob:<sha256>` (этап 17), клиенту возвращается base64. */
   data: z.string().max(MAX_ATTACHMENT_DATA).optional()
 });
 
