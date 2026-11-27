@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Bot, ChevronLeft, FileText, Paperclip, Send, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChannelGlyph } from "@/components/agents/channel-icon";
+import { requestAiReply } from "@/lib/ai-client";
 import { useUpdateConversation } from "@/lib/api/hooks";
 import { ACTOR_META, MODE_META, addMessagePatch, fmtBytes, nowHM } from "@/lib/selectors/dialogs";
 import { MAX_ATTACHMENT_BYTES, MAX_MESSAGE_ATTACHMENTS, type Attachment, type Channel, type Conversation } from "@/lib/schemas";
@@ -40,6 +41,9 @@ export function ChatThread({ conv, channels, agentName, onBack, className }: {
   const update = useUpdateConversation();
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  /** Этап 16: запрос ответа ИИ по инструкции сотрудника и базе знаний. */
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
   /** Выбранные вложения (этап 6): валидируются до отправки, уходят вместе с сообщением. */
   const [files, setFiles] = useState<Attachment[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -56,6 +60,33 @@ export function ChatThread({ conv, channels, agentName, onBack, className }: {
   }, [conv.id, conv.messages.length]);
 
   const fail = () => setError("Не удалось отправить. Данные не сохранились — попробуйте ещё раз.");
+
+  /**
+   * Этап 16: «Ответ ИИ» — сервер собирает ответ по инструкции сотрудника, тезисам базы знаний
+   * и последним сообщениям диалога. Без настроенного провайдера приходит честный демо-ответ
+   * с пометкой «не LLM»; при сбое провайдера показывается ошибка, а не подменённый ответ.
+   */
+  const requestAi = () => {
+    if (aiBusy) return;
+    const lastClient = [...conv.messages].reverse().find((m) => m.from === "client" && m.text);
+    if (!lastClient) return;
+    setAiBusy(true);
+    setAiError(null);
+    const history = conv.messages
+      .filter((m) => m.text)
+      .slice(-10)
+      .map((m) => ({ role: m.from === "client" ? ("user" as const) : ("assistant" as const), content: m.text }));
+    requestAiReply({ scope: "dialog", agentId: conv.agentId, message: lastClient.text, history })
+      .then((r) => {
+        const msg: ChatMessage = { from: "ai", text: r.text, time: nowHM(), note: r.note };
+        update.mutate(
+          { id: conv.id, patch: addMessagePatch(conv, msg) },
+          { onError: () => setAiError("Не удалось сохранить ответ ИИ — попробуйте ещё раз.") }
+        );
+      })
+      .catch((e: Error) => setAiError(e.message || "Сервис ИИ недоступен — попробуйте ещё раз."))
+      .finally(() => setAiBusy(false));
+  };
 
   /** Выбор файлов: не больше трёх на сообщение, каждый до 1 МБ; при нарушении — ошибка, партия целиком отклоняется. */
   const pickFiles = async (list: FileList | null): Promise<void> => {
@@ -167,10 +198,17 @@ export function ChatThread({ conv, channels, agentName, onBack, className }: {
               <div className={cn("mt-1 text-[11px]", m.from === "human" ? "text-primary-foreground/90" : "text-muted-foreground-strong")}>
                 {ACTOR_META[m.from]}{m.time ? ` · ${m.time}` : ""}
               </div>
+              {m.note ? (
+                <div className="mt-0.5 text-[10px] text-muted-foreground" data-testid="chat-msg-note">{m.note}</div>
+              ) : null}
             </div>
           ))}
         </div>
       </div>
+
+      {aiError ? (
+        <p role="status" className="border-t border-border px-4 py-2 text-xs text-critical" data-testid="chat-ai-error" aria-live="polite">{aiError}</p>
+      ) : null}
 
       {error ? (
         <p role="status" className="border-t border-border px-4 py-2 text-xs text-critical" aria-live="polite">{error}</p>
@@ -209,10 +247,23 @@ export function ChatThread({ conv, channels, agentName, onBack, className }: {
       {/* Композер: в режиме «ИИ» поле отключено, менеджер может передать диалог себе */}
       <div className="flex min-w-0 items-center gap-2 border-t border-border p-3">
         {locked ? (
-          <Button variant="secondary" size="sm" data-testid="chat-takeover" title="Передать менеджеру" onClick={() => update.mutate({ id: conv.id, patch: { mode: "human" } }, { onError: fail })}>
-            <Users aria-hidden />
-            Передать менеджеру
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="chat-ai-reply"
+              title="Ответ ИИ по инструкции сотрудника и базе знаний"
+              disabled={aiBusy || !conv.messages.some((m) => m.from === "client" && m.text)}
+              onClick={requestAi}
+            >
+              <Bot aria-hidden />
+              {aiBusy ? "ИИ отвечает…" : "Ответ ИИ"}
+            </Button>
+            <Button variant="secondary" size="sm" data-testid="chat-takeover" title="Передать менеджеру" onClick={() => update.mutate({ id: conv.id, patch: { mode: "human" } }, { onError: fail })}>
+              <Users aria-hidden />
+              Передать менеджеру
+            </Button>
+          </>
         ) : (
           <Button variant="secondary" size="sm" data-testid="chat-giveback" title="Вернуть диалог ИИ" onClick={() => update.mutate({ id: conv.id, patch: { mode: "ai" } }, { onError: fail })}>
             <Bot aria-hidden />

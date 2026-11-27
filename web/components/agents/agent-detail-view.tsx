@@ -129,7 +129,7 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
         {tab === "channels" && <AgentChannelsCard agent={agent} channels={channels.data ?? []} />}
         {tab === "funnel" && <AgentFunnelCard agent={agent} />}
         {tab === "approvals" && <AgentApprovalsCard agent={agent} />}
-        {tab === "test" && <AgentTestChatCard />}
+        {tab === "test" && <AgentTestChatCard agentId={agent.id} />}
       </Card>
     </div>
   );

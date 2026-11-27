@@ -5,6 +5,8 @@
    сохранение на сервере и после перезагрузки, отправка без текста, превью «📎 имя»,
    панель контекста, мобильный режим список↔переписка, переименование «ИИ-» → «AI-»,
    состояния loading/empty/error/success, overflow, контраст, консоль.
+   Этап 16: кнопка «Ответ ИИ» — серверный маршрут /api/ai/reply, честная пометка «демо,
+   не LLM» без настроенного провайдера, запись ответа с пометкой на сервере.
    Запуск: npm run build && node e2e/dialogs.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
 import { apiItems, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
@@ -171,6 +173,16 @@ async function main() {
       for (const [k, v] of Object.entries(await page.evaluate(contrastProbe))) bad[theme + " " + k] = v;
     }
     check("контраст WCAG AA на разделе в обеих темах" + (Object.keys(bad).length ? "\n     " + Object.entries(bad).slice(0, 5).map(([k, v]) => `${v.ratio} ${k}`).join("\n     ") : ""), Object.keys(bad).length === 0);
+
+    // этап 16: «Ответ ИИ» — серверный маршрут /api/ai/reply; без настроенного провайдера — честный демо-ответ с пометкой
+    await reset(); await open();
+    await page.locator("[data-testid=chat-ai-reply]").click();
+    await page.waitForFunction((n) => document.querySelectorAll("[data-testid=chat-msg]").length > n, await page.locator("[data-testid=chat-msg]").count(), { timeout: 5000 });
+    const aiNote = await page.locator("[data-testid=chat-msg-note]").last().innerText();
+    check("этап 16: «Ответ ИИ» добавляет сообщение с честной пометкой «демо»", /демо/.test(aiNote) && /не LLM/.test(aiNote));
+    const convId = await page.locator("[data-testid=chat-thread]").getAttribute("data-conv-id");
+    const savedConvs = await apiItems("conversations");
+    check("этап 16: ответ ИИ с пометкой записан на сервере", savedConvs.find((c) => c.id === convId)?.messages?.some((m) => m.from === "ai" && Boolean(m.note)) === true);
 
     check("нет внешних запросов", [...hosts].every((h) => /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(h)), [...hosts].join(","));
     check("консоль: нет ошибок и предупреждений (hydration, React)" + (problems.length ? " [" + problems.slice(0, 3).join(" | ") + "]" : ""), problems.length === 0);

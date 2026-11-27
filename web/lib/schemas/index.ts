@@ -67,6 +67,8 @@ export const messageSchema = z.object({
   from: z.enum(["client", "ai", "human"]),
   text: text(10000),
   time: optText,
+  /** Пометка источника ответа (этап 16): «демо-ответ по сценарию, не LLM» или модель провайдера. */
+  note: optText,
   attachments: z.array(attachmentSchema).max(MAX_MESSAGE_ATTACHMENTS).nullish()
 });
 
