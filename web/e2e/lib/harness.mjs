@@ -12,7 +12,8 @@ export async function loadChromium() {
 
 export function startServer() {
   if (process.env.BASE_URL) return null;
-  return spawn(process.execPath, [createRequire(import.meta.url).resolve("next/dist/bin/next"), "start", "-p", PORT], { stdio: "ignore", env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" } });
+  // AIWS_DEBUG=1: панель сбоев /api/debug нужна наборам (setFaults), в проде флаг не задают (этап 19)
+  return spawn(process.execPath, [createRequire(import.meta.url).resolve("next/dist/bin/next"), "start", "-p", PORT], { stdio: "ignore", env: { ...process.env, AIWS_DEBUG: "1", NEXT_TELEMETRY_DISABLED: "1" } });
 }
 
 export async function waitReady(path = "/overview") {

@@ -171,28 +171,19 @@ sudo chown -R aiws:aiws /opt/aiws/app/web/.data
 
 Восстановление: остановить службу → вернуть файл из копии → запустить службу.
 
-## 7. Вариант в Docker
+## 7. Вариант в Docker (этап 19)
 
-```dockerfile
-FROM node:22-alpine
-WORKDIR /app/web
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
-COPY web/ .
-RUN npm run build
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000
-EXPOSE 3000
-CMD ["npm", "start"]
-```
+В репозитории есть готовый контур: `web/Dockerfile` (multi-stage, next standalone, non-root пользователь), `web/docker-compose.yml` (bind-mount `web/.data`, порт только на `127.0.0.1:3000`, healthcheck по `/api/health`) и `web/.env.example` (описание переменных). Сборка и запуск — из каталога `web/`:
 
 ```bash
-docker build -t aiws .
-docker volume create aiws_data
-docker run -d --name aiws -p 3000:3000 \
-  -v aiws_data:/app/web/.data --restart unless-stopped aiws
+cd /opt/aiws/app/web
+docker compose up -d --build
+curl -fsS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/api/health   # ожидается 200
 ```
 
-Наружу — тот же nginx (раздел 5); обновление — пересборка образа и замена контейнера, том `aiws_data` сохраняет данные.
+Панель сбоев `/api/debug` в контуре выключена (без `AIWS_DEBUG=1` маршруты отвечают 404) — это дублирует nginx-запрет из раздела 10. Данные живут в `web/.data` на хосте: база SQLite, `secrets.json`, журнал интеграций; резервное копирование — раздел 6 (копия каталога). Наружу — тот же nginx (раздел 5); обновление — `docker compose up -d --build` (том сохраняет данные), откат — запуск образа предыдущей сборки.
+
+Примечание: сборка проверена на базовом образе `node:22-bookworm-slim` (glibc) — better-sqlite3 ставит готовый биндинг; на alpine (musl) готового биндинга нет, нужна компиляция.
 
 ## 8. Проверки после развёртывания
 
@@ -229,7 +220,7 @@ curl -fsS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/api/collections
 
 ## 10. Безопасность тестового контура
 
-1. `/api/debug` закрыт на nginx (`location /api/debug { deny all; }`) при любом доступе посторонних.
+1. `/api/debug` закрыт на двух уровнях: приложением — без `AIWS_DEBUG=1` маршруты отвечают 404 (этап 19, в systemd-юните флаг не задавать), и nginx — `location /api/debug { deny all; }` при любом доступе посторонних.
 2. Node слушает только `127.0.0.1`; наружу — nginx на 80/443; брандмауэр: 22, 80, 443.
 3. HTTPS через Let's Encrypt (certbot обновляет автоматически).
 4. Служба — от выделенного пользователя `aiws` без прав root; файл данных бэкапится.
