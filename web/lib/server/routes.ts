@@ -13,7 +13,8 @@ const COLLECTION_BY_SLUG = {
   notifications: "NOTIFICATIONS",
   agents: "AGENTS",
   courses: "COURSES",
-  certificates: "CERTIFICATES"
+  certificates: "CERTIFICATES",
+  emails: "EMAILS"
 } as const satisfies Record<string, Exclude<CollectionName, "COMPANY_PROFILE">>;
 
 /** Имя коллекции → ключ репозитория в интерфейсе Api. */
@@ -27,7 +28,8 @@ const REPO_BY_COLLECTION: Record<Exclude<CollectionName, "COMPANY_PROFILE">, key
   NOTIFICATIONS: "notifications",
   AGENTS: "agents",
   COURSES: "courses",
-  CERTIFICATES: "certificates"
+  CERTIFICATES: "certificates",
+  EMAILS: "emails"
 };
 
 export function collectionBySlug(slug: string): Exclude<CollectionName, "COMPANY_PROFILE"> {

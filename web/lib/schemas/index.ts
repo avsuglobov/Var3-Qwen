@@ -44,6 +44,8 @@ export const leadSchema = z.object({
   value: z.number().nullish(),
   lastActivity: optText,
   note: optText,
+  /** E-mail контакта (этап 21): сопоставление отправителей писем с лидами; у старых записей поля нет. */
+  email: optText,
   events: z.array(leadEventSchema)
 });
 
@@ -214,6 +216,55 @@ export type ApprovalRule = z.infer<typeof approvalRuleSchema>;
 export type Agent = z.infer<typeof agentSchema>;
 export type Course = z.infer<typeof courseSchema>;
 export type Certificate = z.infer<typeof certificateSchema>;
+
+/* ---------------------------------------------------------------- входящие письма (этап 21) */
+/** Статусы письма в инбоксе (этап 21). */
+export const MAIL_STATUSES = ["Новое", "В работе", "Обработано"] as const;
+export const mailStatus = z.enum(MAIL_STATUSES);
+/** Категория классификации письма (этап 21: AI или ключевая оценка; «другое» — ничего не подошло). */
+export const MAIL_CATEGORIES = ["спам", "продажи", "поддержка", "другое"] as const;
+export const mailCategory = z.enum(MAIL_CATEGORIES);
+
+/** Лимиты писем (этап 21, решение пользователя): вложений не больше 10 на письмо, каждое — до 10 МБ в blob; тело — до 100 тыс. знаков. */
+export const MAX_MAIL_ATTACHMENTS = 10;
+export const MAX_MAIL_ATTACHMENT_BYTES = 10 * 1_048_576;
+export const MAX_MAIL_BODY = 100_000;
+
+export const mailAttachmentSchema = z.object({
+  name: z.string().min(1).max(300),
+  contentType: optText,
+  size: z.number().finite().min(0),
+  /** Содержимое base64; в сохранённом снимке — ссылка `blob:<sha256>` (этап 17), наружу — снова base64. Крупнее лимита — поле пусто (только метаданные). */
+  data: optText
+});
+
+export const emailSchema = z.object({
+  id,
+  /** Учётная запись почты (блок mail в secrets.json), с которой получено письмо. */
+  accountId: z.string().max(60),
+  folder: text(200),
+  uid: z.number().int().min(0),
+  /** Message-ID с сервера: защита от повторной загрузки того же письма. */
+  messageId: optText,
+  from: text(500),
+  to: text(2000),
+  subject: optText,
+  /** Дата письма в мс с эпохи (Date-header сервера; нет — момент загрузки). */
+  date: z.number().int(),
+  body: z.string().max(MAX_MAIL_BODY).nullish(),
+  status: mailStatus,
+  /** Привязка к лиду CRM (сопоставление по email или вручную из карточки). */
+  leadId: z.string().max(40).nullish(),
+  /** Категория классификации; null — ещё не классифицировано. */
+  category: mailCategory.nullish(),
+  /** Источник классификации: "llm" или "scripted" (честная пометка, как в этапах 16/21). */
+  categorySource: optText,
+  attachments: z.array(mailAttachmentSchema).max(MAX_MAIL_ATTACHMENTS)
+});
+
+export type Email = z.infer<typeof emailSchema>;
+export type MailAttachment = z.infer<typeof mailAttachmentSchema>;
+
 /* ---------------------------------------------------------------- коллекции и снимок хранилища */
 export const COLLECTION_SCHEMAS = {
   LEADS: leadSchema,
@@ -225,7 +276,8 @@ export const COLLECTION_SCHEMAS = {
   NOTIFICATIONS: notificationSchema,
   AGENTS: agentSchema,
   COURSES: courseSchema,
-  CERTIFICATES: certificateSchema
+  CERTIFICATES: certificateSchema,
+  EMAILS: emailSchema
 } as const;
 
 /** COMPANY_PROFILE — одиночная запись (объект, без id): валидируется companyProfileSchema отдельно (load/import/API). */
@@ -245,6 +297,7 @@ export interface DbSnapshot {
   AGENTS: Agent[];
   COURSES: Course[];
   CERTIFICATES: Certificate[];
+  EMAILS: Email[];
   COMPANY_PROFILE: CompanyProfile;
 }
 

@@ -38,9 +38,9 @@ describe("api: reference.integrations — справочник карточек 
 });
 
 describe("селекторы «Настроек» — вкладки и фикстуры прототипа", () => {
-  it("7 вкладок в порядке прототипа, по умолчанию «Профиль»", () => {
-    expect(SETTINGS_TABS.map((t) => t.id)).toEqual(["profile", "company", "roles", "channels", "notifications", "tariff", "data"]);
-    expect(SETTINGS_TABS.map((t) => t.label)).toEqual(["Профиль", "Компания", "Роли", "Каналы", "Уведомления", "Тариф", "Данные"]);
+  it("8 вкладок в порядке прототипа, по умолчанию «Профиль» (этап 21 добавил «Почту»)", () => {
+    expect(SETTINGS_TABS.map((t) => t.id)).toEqual(["profile", "company", "roles", "channels", "notifications", "mail", "tariff", "data"]);
+    expect(SETTINGS_TABS.map((t) => t.label)).toEqual(["Профиль", "Компания", "Роли", "Каналы", "Уведомления", "Почта", "Тариф", "Данные"]);
     expect(DEFAULT_SETTINGS_TAB).toBe("profile");
   });
   it("роли и доступ: Владелец/Менеджер/Бухгалтерия", () => {

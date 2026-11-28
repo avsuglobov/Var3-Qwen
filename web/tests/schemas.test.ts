@@ -20,7 +20,8 @@ function loadPrototypeData(): Record<string, unknown> {
 describe("демо-данные ↔ прототип", () => {
   const proto = loadPrototypeData();
   it("сид совпадает с данными прототипа (иначе перегенерируйте: node scripts/gen-seed.mjs)", () => {
-    for (const name of COLLECTION_NAMES) expect(SEED_DATA[name], name).toEqual(proto[name]);
+    // EMAILS — новая коллекция этапа 21, в прототипе её нет (пустой сид)
+    for (const name of COLLECTION_NAMES) expect(SEED_DATA[name], name).toEqual(proto[name] ?? []);
     expect(ACTIVITY).toEqual(proto["ACTIVITY"]);
     expect(STAGES).toEqual(proto["STAGES"]);
     expect(FUNNELS).toEqual(proto["FUNNELS"]);

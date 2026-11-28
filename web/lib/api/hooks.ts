@@ -29,6 +29,7 @@ export const qk = {
   courses: ["courses"] as const,
   certificates: ["certificates"] as const,
   integrationRuns: ["integrationRuns"] as const,
+  emails: ["emails"] as const,
   authStatus: ["authStatus"] as const,
   users: ["users"] as const
 };
@@ -543,5 +544,142 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => authFetch<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
     onSuccess: () => void qc.invalidateQueries()
+  });
+}
+
+/* ------------------------------------------------------------ Почта (этап 21) */
+
+/** Учётная запись почты, как её отдаёт сервер: пароль заменён маской passMask. */
+export interface MailAccountView {
+  id: string;
+  name: string;
+  imapHost: string;
+  imapPort: number;
+  imapSecure: boolean;
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecure: boolean;
+  user: string;
+  from: string;
+  folders: string[];
+  passMask: string;
+}
+
+export interface MailAccountsState {
+  accounts: MailAccountView[];
+  pollIntervalSec: number;
+  lastError: Record<string, { message: string; at: number }>;
+}
+
+export interface MailTestResult {
+  ok: boolean;
+  imap: { ok: boolean; message: string };
+  smtp: { ok: boolean; message: string };
+}
+
+export interface MailPollResultView {
+  accounts: number;
+  fetched: number;
+  leadsCreated: number;
+  errors: Record<string, string>;
+}
+
+/** Входящие письма коллекции EMAILS (создание — только на сервере, клиент читает и правит статус/лида). */
+export const useEmails = () => useQuery({ queryKey: qk.emails, queryFn: () => getApi().emails.list() });
+
+export const useMailAccounts = () =>
+  useQuery({ queryKey: ["mailAccounts"], queryFn: () => integrationFetch<MailAccountsState>("/api/mail/accounts") });
+
+export function useCreateMailAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (account: Record<string, unknown>) =>
+      integrationFetch<{ ok: boolean; account: MailAccountView }>("/api/mail/accounts", { method: "POST", body: JSON.stringify(account) }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["mailAccounts"] })
+  });
+}
+
+export function useUpdateMailAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Record<string, unknown> }) =>
+      integrationFetch<{ ok: boolean; account: MailAccountView }>(`/api/mail/accounts/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(patch) }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["mailAccounts"] })
+  });
+}
+
+export function useDeleteMailAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      integrationFetch<{ ok: boolean }>(`/api/mail/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["mailAccounts"] })
+  });
+}
+
+/** «Проверить соединение»: IMAP-вход + контрольное SMTP-письмо; сбои возвращаются в результате. */
+export function useTestMailAccount() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      integrationFetch<MailTestResult>(`/api/mail/accounts/${encodeURIComponent(id)}/test`, { method: "POST" })
+  });
+}
+
+export function useSaveMailSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: { pollIntervalSec: number }) =>
+      integrationFetch<{ ok: boolean; pollIntervalSec: number }>("/api/mail/settings", { method: "PUT", body: JSON.stringify(patch) }),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["mailAccounts"] })
+  });
+}
+
+/** «Проверить почту сейчас»: тот же тик, что у планировщика, с немедленным результатом. */
+export function useMailPoll() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => integrationFetch<MailPollResultView>("/api/mail/poll", { method: "POST" }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.emails });
+      void qc.invalidateQueries({ queryKey: qk.leads });
+    }
+  });
+}
+
+export type MailAiAction = "summary" | "classify" | "draft";
+export interface MailAiView {
+  action: MailAiAction;
+  text: string;
+  source: "llm" | "scripted";
+  note: string;
+}
+
+export function useMailAi() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action, tone }: { id: string; action: MailAiAction; tone?: string }) =>
+      integrationFetch<MailAiView>(`/api/mail/${encodeURIComponent(id)}/ai`, { method: "POST", body: JSON.stringify({ action, ...(tone ? { tone } : {}) }) }),
+    onSettled: (_data, _err, vars) => {
+      if (vars.action === "classify") void qc.invalidateQueries({ queryKey: qk.emails });
+    }
+  });
+}
+
+/** Правка письма (статус, привязка лида) — через общий REST коллекции EMAILS. */
+export function useUpdateEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Record<string, unknown> }) =>
+      getApi().emails.update(id, patch),
+    onSettled: () => void qc.invalidateQueries({ queryKey: qk.emails })
+  });
+}
+
+export function useMailReply() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, text }: { id: string; text: string }) =>
+      integrationFetch<{ ok: boolean; to: string }>(`/api/mail/${encodeURIComponent(id)}/reply`, { method: "POST", body: JSON.stringify({ text }) }),
+    onSettled: () => void qc.invalidateQueries({ queryKey: qk.emails })
   });
 }

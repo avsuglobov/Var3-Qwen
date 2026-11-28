@@ -41,6 +41,8 @@ export const SETTINGS_TABS: readonly SettingsTab[] = [
   { id: "roles", label: "Роли" },
   { id: "channels", label: "Каналы" },
   { id: "notifications", label: "Уведомления" },
+  // Этап 21: почтовый канал — учётные записи IMAP/SMTP и интервал опроса
+  { id: "mail", label: "Почта" },
   { id: "tariff", label: "Тариф" },
   { id: "data", label: "Данные" }
 ];

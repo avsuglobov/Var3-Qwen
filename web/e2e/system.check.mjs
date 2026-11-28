@@ -22,7 +22,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { apiProfile, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady } from "./lib/harness.mjs";
+import { apiProfile, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
 
 const { check, done } = reporter();
 
@@ -190,7 +190,7 @@ async function main() {
     // ================= Настройки
     await open("/settings");
     check("шапка: «Настройки», «Профиль, компания, роли, каналы, уведомления, тариф»", (await page.locator("h1").innerText()) === "Настройки" && /Профиль, компания, роли, каналы, уведомления, тариф/.test(await page.locator("main").innerText()));
-    check("7 вкладок, активна «Профиль»", (await page.locator("[data-testid=settings-tabs] button").count()) === 7 && (await page.locator("[data-testid=settings-tab-profile]").getAttribute("aria-pressed")) === "true");
+    check("7+1 вкладок: 8 после этапа 21, активна «Профиль»", (await page.locator("[data-testid=settings-tabs] button").count()) === 8 && (await page.locator("[data-testid=settings-tab-profile]").getAttribute("aria-pressed")) === "true");
     check("профиль: «ВВ», «demo@ai-workspace», «UTC+3 Москва»", (await page.locator("[data-testid=settings-field-name]").inputValue()) === "ВВ" && (await page.locator("[data-testid=settings-field-email]").inputValue()) === "demo@ai-workspace" && (await page.locator("[data-testid=settings-field-tz]").inputValue()) === "UTC+3 Москва");
     await page.locator("[data-testid=settings-tab-company]").click();
     check("компания: «Демо-компания», «demo.site», «Демо-описание.»", (await page.locator("[data-testid=settings-company-name]").inputValue()) === "Демо-компания" && (await page.locator("[data-testid=settings-company-site]").inputValue()) === "demo.site" && (await page.locator("[data-testid=settings-company-about]").inputValue()) === "Демо-описание.");
@@ -213,6 +213,32 @@ async function main() {
     check("этап 20: тумблеры сохраняются на сервере и переживают перезагрузку (sw-3=true, sw-0=false)", (await swsAfter[3].getAttribute("aria-checked")) === "true" && (await swsAfter[0].getAttribute("aria-checked")) === "false");
     await swsAfter[3].click(); // вернуть «Ошибка агента» в дефолт false
     await swsAfter[0].click(); // вернуть «Новый лид» в дефолт true
+
+    // вкладка «Почта» (этап 21): аккаунты IMAP/SMTP, маска пароля, интервал опроса
+    await page.locator("[data-testid=settings-tab-mail]").click();
+    await page.waitForSelector("[data-testid=settings-mail-name]");
+    await waitFor(async () => (await page.locator("main").innerText()).includes("Учётных записей нет"));
+    check("этап 21 почта: пустой список и подсказка", (await page.locator("[data-testid=settings-mail-accounts]").count()) === 0 && (await page.locator("main").innerText()).includes("Учётных записей нет"));
+    await page.locator("[data-testid=settings-mail-name]").fill("Продажи");
+    await page.locator("[data-testid=settings-mail-user]").fill("sales@test");
+    await page.locator("[data-testid=settings-mail-pass]").fill("parol-12345");
+    await page.locator("[data-testid=settings-mail-imap-host]").fill("imap.test");
+    await page.locator("[data-testid=settings-mail-smtp-host]").fill("smtp.test");
+    await page.locator("[data-testid=settings-mail-folders]").fill("Sent");
+    await page.locator("[data-testid=settings-mail-save]").click();
+    await page.waitForSelector("[data-testid=settings-mail-account]", { timeout: 8000 });
+    const mailAccountText = await page.locator("[data-testid=settings-mail-account]").innerText();
+    check("этап 21 почта: аккаунт добавлен, пароль показан маской «••••2345», IMAP-порт дефолт 993 по TLS-флагу", mailAccountText.includes("sales@test") && mailAccountText.includes("••••2345") && mailAccountText.includes("993") && mailAccountText.includes("INBOX") && mailAccountText.includes("Sent"));
+    const mailApiState = await (await fetch(BASE + "/api/mail/accounts")).json();
+    check("этап 21 почта: секрет не покидает сервер (в JSON только passMask)", mailApiState.accounts.length === 1 && !JSON.stringify(mailApiState).includes("parol-12345") && mailApiState.accounts[0].passMask.endsWith("2345"));
+    await page.locator("[data-testid=settings-mail-interval]").fill("300");
+    await page.locator("[data-testid=settings-mail-interval-save]").click();
+    await waitFor(async () => (await (await fetch(BASE + "/api/mail/settings")).json()).pollIntervalSec === 300);
+    check("этап 21 почта: интервал опроса 300 с сохранён на сервере", (await (await fetch(BASE + "/api/mail/settings")).json()).pollIntervalSec === 300);
+    await page.locator(`[data-testid=settings-mail-delete-${mailApiState.accounts[0].id}]`).click();
+    await waitFor(async () => (await (await fetch(BASE + "/api/mail/accounts")).json()).accounts.length === 0);
+    check("этап 21 почта: удаление аккаунта вместе с курсорами", (await (await fetch(BASE + "/api/mail/accounts")).json()).accounts.length === 0);
+
     await page.locator("[data-testid=settings-tab-tariff]").click();
     const tariffText = await page.locator("main").innerText();
     check("тариф: «Тариф: Демо», цены скрыты, есть выбор и сохранение (этап 7)", tariffText.includes("Тариф: Демо") && tariffText.includes("Цены не показываются (демо)") && (await page.locator("[data-testid=settings-tariff-select]").count()) === 1 && (await page.locator("[data-testid=settings-tariff-save]").count()) === 1 && (await page.locator("[data-testid=settings-tariff-select] option").count()) === 3);

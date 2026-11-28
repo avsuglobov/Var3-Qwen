@@ -167,6 +167,45 @@ export const notificationsBlockSchema = z.object({
 });
 export type NotificationsBlock = z.infer<typeof notificationsBlockSchema>;
 
+/* ---------------------------------------------------------------- Почта (этап 21) */
+
+/** Учётная запись почтового канала (этап 21): IMAP для входящих, SMTP для исходящих. Пароль — только на сервере. */
+export const mailAccountSchema = z.object({
+  id: z.string().min(1).max(60),
+  /** Человекочитаемое имя аккаунта в интерфейсе («Продажи@…»). */
+  name: z.string().min(1).max(120),
+  imapHost: z.string().min(1).max(200),
+  imapPort: z.number().int().min(1).max(65535),
+  /** true — неявный TLS (порт 993), false — STARTTLS/plain 143. */
+  imapSecure: z.boolean(),
+  smtpHost: z.string().min(1).max(200),
+  smtpPort: z.number().int().min(1).max(65535),
+  smtpSecure: z.boolean(),
+  user: z.string().min(1).max(200),
+  /** Пароль ящика; в браузер уходит только маска maskSecret(), полное значение не покидает сервер. */
+  pass: z.string().min(1).max(200),
+  /** Адрес отправителя исходящих писем (по умолчанию равен user). */
+  from: z.string().min(3).max(200),
+  /** Папки IMAP для чтения: INBOX всегда входит первым (решение этапа 21), далее — настраиваемые. */
+  folders: z.array(z.string().min(1).max(200)).min(1).max(10)
+});
+export type MailAccount = z.infer<typeof mailAccountSchema>;
+
+/** Курсор чтения папки: наибольший загруженный UID (инкрементальная загрузка, как syncCursor этапа 12). */
+export const mailCursorSchema = z.object({ uid: z.number().int().min(0) });
+
+/** Настройки почтового канала (этап 21); блока нет — канал не настроен, опрос не выполняется. */
+export const mailBlockSchema = z.object({
+  accounts: z.array(mailAccountSchema).max(5).default([]),
+  /** Интервал фонового опроса IMAP в секундах (решение этапа 21: дефолт 2 минуты). */
+  pollIntervalSec: z.number().int().min(30).max(3600).default(120),
+  /** Курсоры по папкам — ключ «accountId:folder». */
+  cursors: z.record(z.string().max(270), mailCursorSchema).optional(),
+  /** Последняя ошибка опроса по аккаунту — показывается в Настройках → Почта. */
+  lastError: z.record(z.string().max(60), notifyErrorSchema).optional()
+});
+export type MailBlock = z.infer<typeof mailBlockSchema>;
+
 /** Содержимое файла секретов: ключи не попадают в снимок, экспорт данных и клиент. */
 export const credentialsFileSchema = z.object({
   version: z.literal(1),
@@ -186,7 +225,9 @@ export const credentialsFileSchema = z.object({
   /** LLM-провайдер AI-сотрудников (этап 16): ключ вне снимка, экспорта и клиента; блока нет — демо-ответы. */
   ai: aiBlockSchema.optional(),
   /** Уведомления (этап 20): SMTP, тумблеры событий и последняя ошибка отправки. */
-  notifications: notificationsBlockSchema.optional()
+  notifications: notificationsBlockSchema.optional(),
+  /** Почтовый канал (этап 21): учётные записи IMAP/SMTP, интервал опроса, курсоры папок. */
+  mail: mailBlockSchema.optional()
 });
 export type CredentialsFile = z.infer<typeof credentialsFileSchema>;
 

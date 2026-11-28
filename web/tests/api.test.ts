@@ -99,7 +99,7 @@ describe("адаптер: сбой сервиса, экспорт/импорт, 
     expect(JSON.parse(json).version).toBe(1);
     const b = createLocalApi();
     const res = await b.data.importJSON(json);
-    expect(res.imported).toHaveLength(10);
+    expect(res.imported).toHaveLength(11);
     expect(res.dropped).toBe(0);
     expect((await b.onboarding.get("reg"))?.done).toBe(false);
   });
