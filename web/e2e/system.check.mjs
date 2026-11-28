@@ -201,12 +201,18 @@ async function main() {
     const chipAccents = await page.locator("[data-testid=settings-channel-chip]").evaluateAll((els) => els.map((e) => e.className.includes("accent")));
     check("каналы: 8 чипов, первые 3 акцентные (Telegram, WhatsApp, MAX)", (await page.locator("[data-testid=settings-channel-chip]").count()) === 8 && chipAccents[0] && chipAccents[1] && chipAccents[2] && !chipAccents[3] && (await page.locator("[data-testid=settings-channel-chip][data-channel=telegram]").innerText()).includes("Telegram"));
     await page.locator("[data-testid=settings-tab-notifications]").click();
-    const sws = [0, 1, 2, 3].map((i) => page.locator(`[data-testid=settings-sw-${i}]`));
-    check("уведомления: 4 переключателя, первые 3 включены, «Ошибка агента (КРИТИЧНО)» выключен", (await sws[0].getAttribute("aria-checked")) === "true" && (await sws[1].getAttribute("aria-checked")) === "true" && (await sws[2].getAttribute("aria-checked")) === "true" && (await sws[3].getAttribute("aria-checked")) === "false");
+    const sws = [0, 1, 2, 3, 4].map((i) => page.locator(`[data-testid=settings-sw-${i}]`));
+    check("уведомления: 5 переключателей — первые 3 включены, «Ошибка агента» и «Итог синхронизации» (этап 20) выключены", (await sws[0].getAttribute("aria-checked")) === "true" && (await sws[1].getAttribute("aria-checked")) === "true" && (await sws[2].getAttribute("aria-checked")) === "true" && (await sws[3].getAttribute("aria-checked")) === "false" && (await sws[4].getAttribute("aria-checked")) === "false");
     await sws[3].click();
     check("клик переключает «Ошибка агента» (aria-checked=true)", (await sws[3].getAttribute("aria-checked")) === "true");
     await sws[0].focus(); await page.keyboard.press("Space");
     check("пробел переключает «Новый лид» с клавиатуры (aria-checked=false)", (await sws[0].getAttribute("aria-checked")) === "false");
+    await page.reload();
+    await page.locator("[data-testid=settings-tab-notifications]").click();
+    const swsAfter = [0, 1, 2, 3, 4].map((i) => page.locator(`[data-testid=settings-sw-${i}]`));
+    check("этап 20: тумблеры сохраняются на сервере и переживают перезагрузку (sw-3=true, sw-0=false)", (await swsAfter[3].getAttribute("aria-checked")) === "true" && (await swsAfter[0].getAttribute("aria-checked")) === "false");
+    await swsAfter[3].click(); // вернуть «Ошибка агента» в дефолт false
+    await swsAfter[0].click(); // вернуть «Новый лид» в дефолт true
     await page.locator("[data-testid=settings-tab-tariff]").click();
     const tariffText = await page.locator("main").innerText();
     check("тариф: «Тариф: Демо», цены скрыты, есть выбор и сохранение (этап 7)", tariffText.includes("Тариф: Демо") && tariffText.includes("Цены не показываются (демо)") && (await page.locator("[data-testid=settings-tariff-select]").count()) === 1 && (await page.locator("[data-testid=settings-tariff-save]").count()) === 1 && (await page.locator("[data-testid=settings-tariff-select] option").count()) === 3);
@@ -396,6 +402,29 @@ async function main() {
     fs.rmSync(".data/secrets.json", { force: true }); // сброс auth: не оставлять блокировку следующим наборам (a11y)
     const stReset = await fetch(BASE + "/api/auth/status").then((r) => r.json());
     check("этап 18: сброс secrets.json возвращает открытый режим (совместимость наборов e2e)", stReset.mode === "open" && stReset.unlocked === true);
+
+    // этап 20: SMTP уведомлений — форма сохраняется, пароль в браузере только маской, тест-отправка честно отказывает без сервера
+    await page.goto(BASE + "/settings", { waitUntil: "networkidle" });
+    await page.waitForSelector("[data-testid=settings-tab-profile]", { timeout: 15000 });
+    await page.locator("[data-testid=settings-tab-notifications]").click();
+    await page.locator("[data-testid=settings-smtp-host]").fill("mail.test");
+    await page.locator("[data-testid=settings-smtp-port]").fill("587");
+    await page.locator("[data-testid=settings-smtp-user]").fill("robot@test");
+    await page.locator("[data-testid=settings-smtp-pass]").fill("smtp-pass-1234567890");
+    await page.locator("[data-testid=settings-smtp-from]").fill("ai@test");
+    await page.locator("[data-testid=settings-smtp-to]").fill("boss@test");
+    await page.locator("[data-testid=settings-smtp-save]").click();
+    await page.waitForFunction(() => (document.querySelector("[data-testid=settings-smtp-feedback]")?.textContent ?? "").includes("SMTP сохранён"), { timeout: 8000 });
+    await page.reload();
+    await page.locator("[data-testid=settings-tab-notifications]").click();
+    const smtpHost = await page.locator("[data-testid=settings-smtp-host]").inputValue();
+    const smtpPass = await page.locator("[data-testid=settings-smtp-pass]").inputValue();
+    check("этап 20: SMTP сохранён и после перезагрузки подставлен, пароль не возвращается в форму (маска не в поле)", smtpHost === "mail.test" && smtpPass === "");
+    const stNotif = await fetch(BASE + "/api/notifications").then((r) => r.json());
+    check("этап 20: GET /api/notifications — configured, пароль только маской, full-секрет не уходит", stNotif.configured === true && stNotif.smtp.pass.startsWith("••••") && !stNotif.smtp.pass.includes("1234567890"));
+    await page.locator("[data-testid=settings-smtp-test]").click();
+    await page.waitForFunction(() => (document.querySelector("[data-testid=settings-smtp-feedback]")?.textContent ?? "").includes("не отправлено"), { timeout: 15000 });
+    check("этап 20: тестовая отправка к несуществующему серверу — честный отказ (HTTP 200, ok:false)", (await page.locator("[data-testid=settings-smtp-feedback]").innerText()).includes("не отправлено"));
 
     // этап 16: AI-маршруты — без блока ai честный scripted-fallback; недоступный провайдер — честная 503; ключ только маской
     const stAi0 = await fetch(BASE + "/api/ai/status").then((r) => r.json());

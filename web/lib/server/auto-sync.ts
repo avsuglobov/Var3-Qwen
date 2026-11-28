@@ -2,6 +2,7 @@ import { INTEGRATION_ADAPTERS } from "@/lib/integrations/adapters";
 import type { IntegrationRun } from "@/lib/integrations/types";
 import { isRunInFlight, runIntegration } from "@/lib/server/integrations";
 import { autoSyncEnabledOf, credentialsOf } from "@/lib/server/secrets";
+import { notifyEvent } from "@/lib/server/notify";
 
 /**
  * Серверный планировщик авто-синхронизации (этапы 13–14): каждые 15 минут по каждой
@@ -48,7 +49,14 @@ export async function autoSyncTick(): Promise<void> {
   const settled = await Promise.allSettled(runs.map((r) => r.run));
   settled.forEach((s, i) => {
     if (s.status === "rejected") {
-      console.warn(`[auto-sync] ${runs[i].id}: прогон не выполнен: ${s.reason instanceof Error ? s.reason.message : "неизвестная ошибка"}`);
+      const reason = s.reason instanceof Error ? s.reason.message : "неизвестная ошибка";
+      console.warn(`[auto-sync] ${runs[i].id}: прогон не выполнен: ${reason.slice(0, 200)}`);
+      // Этап 20: сбой авто-синка до старта прогона — тоже «Ошибка агента (КРИТИЧНО)»
+      // (тумблер по умолчанию выключен; письмо уходит, если администратор включил его).
+      void notifyEvent("Ошибка агента (КРИТИЧНО)", {
+        subject: `Сбой авто-синхронизации: ${runs[i].id}`,
+        lines: [`Интеграция ${runs[i].id}: прогон не выполнен: ${reason.slice(0, 250)}.`, "Прогон не стартовал — записи в журнале интеграций нет."]
+      });
     }
   });
 }

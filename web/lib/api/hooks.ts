@@ -410,6 +410,46 @@ export function useAmocrmAuthorize() {
   });
 }
 
+/* ------------------------------------------------------------ Уведомления (этап 20) */
+
+export interface NotificationsState {
+  configured: boolean;
+  smtp: { host: string; port: number; secure: boolean; user: string; pass: string; from: string; to: string } | null;
+  toggles: Record<string, boolean>;
+  lastError: { message: string; at: number } | null;
+}
+
+/** Состояние уведомлений: настроен ли SMTP (пароль — маской), тумблеры, последняя ошибка отправки. */
+export const useNotifySettings = () =>
+  useQuery({ queryKey: ["notifySettings"], queryFn: () => integrationFetch<NotificationsState>("/api/notifications") });
+
+/** Переключение тумблера события; состояние живёт в secrets.json и переживает перезагрузку. */
+export function useSetNotifyToggle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, enabled }: { key: string; enabled: boolean }) =>
+      integrationFetch<{ ok: boolean; toggles: Record<string, boolean> }>("/api/notifications", {
+        method: "PUT",
+        body: JSON.stringify({ toggles: { [key]: enabled } })
+      }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["notifySettings"] })
+  });
+}
+
+/** Сохранение SMTP-ключей (админ): пустой pass — «оставить сохранённый пароль». */
+export function useSaveSmtp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (cfg: { host: string; port: number; secure: boolean; user: string; pass: string; from: string; to: string }) =>
+      integrationFetch<{ ok: boolean; configured: boolean }>("/api/notifications/smtp", { method: "PUT", body: JSON.stringify(cfg) }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["notifySettings"] })
+  });
+}
+
+/** Тестовая отправка (админ): честный результат — сбой соединения не выглядит сбоем приложения. */
+export const useTestNotification = () =>
+  useMutation({ mutationFn: () => integrationFetch<{ ok: boolean; message: string }>("/api/notifications/test", { method: "POST" }) });
+
 /* ------------------------------------------------------------ Вход и пользователи (этап 18) */
 
 /** Состояние входа (открытый маршрут /api/auth/status): mode «open» — API открыт (демо/e2e),

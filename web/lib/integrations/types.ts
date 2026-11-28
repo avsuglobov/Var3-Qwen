@@ -141,6 +141,32 @@ export const aiBlockSchema = z.object({
 });
 export type AiBlock = z.infer<typeof aiBlockSchema>;
 
+/** Настройки уведомлений (этап 20): SMTP-сервер и тумблеры событий — вне снимка и экспорта. */
+export const smtpConfigSchema = z.object({
+  host: z.string().min(1).max(200),
+  port: z.number().int().min(1).max(65535),
+  /** true — неявный TLS сразу (порт 465), false — STARTTLS при поддержке сервера. */
+  secure: z.boolean(),
+  user: z.string().max(200).optional(),
+  pass: z.string().max(200).optional(),
+  from: z.string().min(3).max(200),
+  /** Список получателей через запятую. */
+  to: z.string().min(3).max(500)
+});
+export type SmtpConfig = z.infer<typeof smtpConfigSchema>;
+
+/** Последняя ошибка отправки — показывается в Настройках, чтобы сбой не был немым. */
+export const notifyErrorSchema = z.object({ message: z.string().max(300), at: z.number().int() });
+export type NotifyError = z.infer<typeof notifyErrorSchema>;
+
+export const notificationsBlockSchema = z.object({
+  smtp: smtpConfigSchema.optional(),
+  /** Серверные тумблеры событий; записи нет — дефолт из NOTIFICATION_TOGGLES (клиентский список). */
+  toggles: z.record(z.string().max(60), z.boolean()).optional(),
+  lastError: notifyErrorSchema.optional()
+});
+export type NotificationsBlock = z.infer<typeof notificationsBlockSchema>;
+
 /** Содержимое файла секретов: ключи не попадают в снимок, экспорт данных и клиент. */
 export const credentialsFileSchema = z.object({
   version: z.literal(1),
@@ -158,7 +184,9 @@ export const credentialsFileSchema = z.object({
   /** Защита API (этап 15): PIN-хэш и активные сессии; блока нет — PIN не задан, API открыт. */
   auth: authBlockSchema.optional(),
   /** LLM-провайдер AI-сотрудников (этап 16): ключ вне снимка, экспорта и клиента; блока нет — демо-ответы. */
-  ai: aiBlockSchema.optional()
+  ai: aiBlockSchema.optional(),
+  /** Уведомления (этап 20): SMTP, тумблеры событий и последняя ошибка отправки. */
+  notifications: notificationsBlockSchema.optional()
 });
 export type CredentialsFile = z.infer<typeof credentialsFileSchema>;
 
