@@ -33,7 +33,10 @@ export function reporter() {
 }
 
 /* REST-хелперы (этап 4): данные теперь на сервере, поэтому сброс, сбои и «что записалось»
-   проверяются напрямую через API, а не через localStorage. */
+   проверяются напрямую через API, а не через localStorage. Контракт входа (этап 18): наборы
+   живут в открытом режиме — блока auth в .data/secrets.json нет, guardApi пропускает запросы;
+   только system.check сам заводит блок auth (миграция PIN → админ, роли, lockout) и в конце
+   удаляет secrets.json, возвращая открытый режим для следующих наборов. */
 
 export async function apiReset(base = BASE) {
   const res = await fetch(base + "/api/data/reset", { method: "POST" });
