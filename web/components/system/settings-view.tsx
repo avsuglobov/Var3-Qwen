@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { useAuthStatus, useBootstrapAdmin, useChannels, useCompanyProfile, useCreateUser, useDeleteUser, useExportData, useImportData, useLogout, usePatchUser, useResetData, useSaveCompanyProfile, useUsers } from "@/lib/api/hooks";
+import { useAuthStatus, useBootstrapAdmin, useChannels, useCompanyProfile, useCreateUser, useDeleteUser, useExportData, useImportData, useLogout, useNotifySettings, usePatchUser, useResetData, useSaveCompanyProfile, useSaveSmtp, useSetNotifyToggle, useTestNotification, useUsers } from "@/lib/api/hooks";
 import type { PublicUser } from "@/lib/api/hooks";
 import {
   DEFAULT_SETTINGS_TAB,
@@ -336,23 +336,117 @@ function ChannelsTab({ channelsQ }: { channelsQ: { data?: { id: string; name: st
 /* ------------------------------------------------------- Уведомления */
 
 function NotificationsTab() {
-  const [toggles, setToggles] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(NOTIFICATION_TOGGLES.map((t) => [t.key, t.def]))
-  );
+  const notifQ = useNotifySettings();
+  const setToggle = useSetNotifyToggle();
+  const saveSmtp = useSaveSmtp();
+  const sendTest = useTestNotification();
+  const [toggles, setToggles] = useState<Record<string, boolean>>({});
+  const [smtp, setSmtp] = useState({ host: "", port: "587", secure: false, user: "", pass: "", from: "", to: "" });
+  const [smtpTouched, setSmtpTouched] = useState(false);
+  const [feedback, setFeedback] = useState<{ text: string; kind: "status" | "alert" }>({ text: "", kind: "status" });
+
+  if (notifQ.isPending) {
+    return (
+      <p className="text-[13px] text-muted-foreground" aria-busy="true">
+        Загрузка уведомлений…
+      </p>
+    );
+  }
+  if (notifQ.isError) {
+    return (
+      <p role="alert" className="text-[13px] text-destructive">
+        {notifQ.error?.message ?? "Не удалось загрузить уведомления"}
+      </p>
+    );
+  }
+  const state = notifQ.data;
+
+  const toggleOf = (key: string, def: boolean): boolean => (key in toggles ? toggles[key] : state.toggles[key] ?? def);
+  const flip = (key: string, next: boolean): void => {
+    setToggles((prev) => ({ ...prev, [key]: next })); // оптимистично, ответ подтверждает
+    setToggle.mutate(
+      { key, enabled: next },
+      { onError: (e) => setFeedback({ text: e.message, kind: "alert" }) }
+    );
+  };
+
+  const smtpForm = smtpTouched ? smtp : {
+    host: state.smtp?.host ?? "",
+    port: String(state.smtp?.port ?? 587),
+    secure: state.smtp?.secure ?? false,
+    user: state.smtp?.user ?? "",
+    pass: "", // пусто = «оставить сохранённый пароль»
+    from: state.smtp?.from ?? "",
+    to: state.smtp?.to ?? ""
+  };
+
+  const save = (): void => {
+    setFeedback({ text: "Сохранение SMTP…", kind: "status" });
+    saveSmtp.mutate(
+      { host: smtpForm.host.trim(), port: Number(smtpForm.port), secure: smtpForm.secure, user: smtpForm.user.trim(), pass: smtpForm.pass, from: smtpForm.from.trim(), to: smtpForm.to.trim() },
+      {
+        onSuccess: (d) => setFeedback({ text: d.ok ? "SMTP сохранён — события будут отправляться почтой" : "SMTP сохранён", kind: "status" }),
+        onError: (e) => setFeedback({ text: e.message, kind: "alert" })
+      }
+    );
+  };
+  const test = (): void => {
+    setFeedback({ text: "Отправка тестового письма…", kind: "status" });
+    sendTest.mutate(undefined, {
+      onSuccess: (d) => setFeedback({ text: d.message, kind: d.ok ? "status" : "alert" }),
+      onError: (e) => setFeedback({ text: e.message, kind: "alert" })
+    });
+  };
+
   return (
     <div className="space-y-3.5">
       {NOTIFICATION_TOGGLES.map((t, i) => (
         <div key={t.key} className="flex items-center justify-between gap-3">
           <div className="min-w-0 text-[13.5px] font-medium">{t.key}</div>
           <Switch
-            checked={toggles[t.key] ?? t.def}
-            onCheckedChange={(next) => setToggles((prev) => ({ ...prev, [t.key]: next }))}
+            checked={toggleOf(t.key, t.def)}
+            onCheckedChange={(next) => flip(t.key, next)}
             label={`Уведомление: ${t.key}`}
             testId={`settings-sw-${i}`}
           />
         </div>
       ))}
-      <p className="text-[11.5px] text-muted-foreground">Настройки действуют до конца сессии (демо).</p>
+      <p className="text-[11.5px] text-muted-foreground">Тумблеры сохраняются на сервере; письма уходят почтой, когда настроен SMTP.</p>
+      {state.lastError && (
+        <p role="alert" className="text-[11.5px] text-destructive" data-testid="settings-notify-lasterror">
+          Последняя ошибка отправки: {state.lastError.message}
+        </p>
+      )}
+      <div className="space-y-2 border-t pt-3">
+        <div className="section-label">SMTP-сервер</div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <input className={FIELD} type="text" placeholder="Сервер (smtp.example.com)" aria-label="SMTP-сервер" value={smtpForm.host}
+            onChange={(e) => { setSmtpTouched(true); setSmtp((p) => ({ ...p, host: e.target.value })); }} data-testid="settings-smtp-host" />
+          <input className={FIELD} type="text" inputMode="numeric" placeholder="Порт (587)" aria-label="SMTP-порт" value={smtpForm.port}
+            onChange={(e) => { setSmtpTouched(true); setSmtp((p) => ({ ...p, port: e.target.value })); }} data-testid="settings-smtp-port" />
+          <input className={FIELD} type="text" placeholder="Логин (необязательно)" aria-label="SMTP-логин" value={smtpForm.user}
+            onChange={(e) => { setSmtpTouched(true); setSmtp((p) => ({ ...p, user: e.target.value })); }} data-testid="settings-smtp-user" />
+          <input className={FIELD} type="password" autoComplete="new-password" placeholder="Пароль (пусто — не менять)" aria-label="SMTP-пароль" value={smtpForm.pass}
+            onChange={(e) => { setSmtpTouched(true); setSmtp((p) => ({ ...p, pass: e.target.value })); }} data-testid="settings-smtp-pass" />
+          <input className={FIELD} type="text" placeholder="Адрес отправителя" aria-label="Адрес отправителя" value={smtpForm.from}
+            onChange={(e) => { setSmtpTouched(true); setSmtp((p) => ({ ...p, from: e.target.value })); }} data-testid="settings-smtp-from" />
+          <input className={FIELD} type="text" placeholder="Получатели через запятую" aria-label="Получатели" value={smtpForm.to}
+            onChange={(e) => { setSmtpTouched(true); setSmtp((p) => ({ ...p, to: e.target.value })); }} data-testid="settings-smtp-to" />
+        </div>
+        <label className="flex items-center gap-2 text-[12.5px] text-muted-foreground" htmlFor="smtp-secure">
+          <Switch checked={smtpForm.secure} onCheckedChange={(next) => { setSmtpTouched(true); setSmtp((p) => ({ ...p, secure: next })); }} label="SMTP: защищённое соединение" testId="settings-smtp-secure" />
+          secure (STARTTLS); порт 465 — неявный TLS
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" data-testid="settings-smtp-save" onClick={save}>Сохранить SMTP</Button>
+          <Button variant="secondary" size="sm" data-testid="settings-smtp-test" onClick={test}>Отправить тестовое письмо</Button>
+        </div>
+        {feedback.text && (
+          <p role={feedback.kind === "alert" ? "alert" : "status"} className={cn("text-[12px]", feedback.kind === "alert" ? "text-destructive" : "text-muted-foreground")} data-testid="settings-smtp-feedback">
+            {feedback.text}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

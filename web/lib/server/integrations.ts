@@ -6,6 +6,7 @@ import type { IntegrationAction, IntegrationRun, IntegrationRunOutcome, RunTrigg
 import { INTEGRATIONS } from "@/lib/mock-data/reference";
 import { appendRun } from "@/lib/server/runs";
 import { credentialsOf, saveCredentials, saveSyncCursor, syncCursorOf } from "@/lib/server/secrets";
+import { notifyEvent } from "@/lib/server/notify";
 import { getServerStore } from "@/lib/server/store";
 
 /**
@@ -74,6 +75,8 @@ export async function runIntegration(integrationId: string, action: IntegrationA
     // Этап 12: курсор инкремента — момент последнего успешного полного прогона (null — его ещё не было).
     const cursorAt = action === "sync" ? syncCursorOf(integrationId) : null;
     const started = Date.now();
+    // Этап 20: количество новых лидов прогона — для события «Новый лид» (эскалация наружу).
+    let importedNew = 0;
     let outcome: IntegrationRunOutcome | SyncResult;
     try {
       outcome = action === "check" ? await adapter.check(creds, fetchImpl) : await adapter.sync(creds, fetchImpl, cursorAt ?? undefined);
@@ -103,6 +106,7 @@ export async function runIntegration(integrationId: string, action: IntegrationA
         const cursorNote = truncated
           ? "изменённых записей больше потолка прогона — курсор не сдвинут, повторите синхронизацию"
           : "курсор синхронизации обновлён";
+        importedNew = counts.created;
         outcome = {
           ...outcome,
           detail: `${outcome.detail}; импортировано ${counts.created + counts.updated} (новых ${counts.created}, обновлено ${counts.updated}); ${cursorNote}`
@@ -123,6 +127,28 @@ export async function runIntegration(integrationId: string, action: IntegrationA
       trigger
     };
     appendRun(run);
+    // Этап 20: уведомления о синхронизации — fire-and-forget, результат прогона не меняют.
+    // «Новый лид» — новые лиды у любого прогона; «Итог синхронизации» и «Ошибка агента
+    // (КРИТИЧНО)» — только авто-прогоны: ручной пользователь и так видит в журнале.
+    if (action === "sync" && run.ok && importedNew > 0) {
+      void notifyEvent("Новый лид", {
+        subject: `Новые лиды: ${integrationId} — импортировано ${importedNew}`,
+        lines: [`Интеграция ${integrationId}: ${run.detail.slice(0, 300)}.`, "Новые лиды размещены в первой стадии воронки — требуют разбора."]
+      });
+    }
+    if (trigger === "auto" && action === "sync") {
+      if (run.ok) {
+        void notifyEvent("Итог синхронизации", {
+          subject: `Итог синхронизации: ${integrationId}`,
+          lines: [run.detail.slice(0, 400)]
+        });
+      } else {
+        void notifyEvent("Ошибка агента (КРИТИЧНО)", {
+          subject: `Сбой авто-синхронизации: ${integrationId}`,
+          lines: [`Интеграция ${integrationId}: ${run.detail.slice(0, 300)}.`, "Авто-синхронизация выполнена с ошибкой — проверьте журнал интеграций."]
+        });
+      }
+    }
     return run;
   } finally {
     releaseRunLock(integrationId);
