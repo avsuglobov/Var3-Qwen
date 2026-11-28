@@ -29,7 +29,8 @@ export const qk = {
   courses: ["courses"] as const,
   certificates: ["certificates"] as const,
   integrationRuns: ["integrationRuns"] as const,
-  authStatus: ["authStatus"] as const
+  authStatus: ["authStatus"] as const,
+  users: ["users"] as const
 };
 
 export const useLeads = () => useQuery({ queryKey: qk.leads, queryFn: () => getApi().leads.list() });
@@ -409,15 +410,25 @@ export function useAmocrmAuthorize() {
   });
 }
 
-/* ------------------------------------------------------------ Защита API (этап 15) */
+/* ------------------------------------------------------------ Вход и пользователи (этап 18) */
 
-/** Состояние защиты (открытый маршрут /api/auth/status): задан ли PIN и разблокировано ли приложение. */
+/** Состояние входа (открытый маршрут /api/auth/status): mode «open» — API открыт (демо/e2e),
+ *  «pin» — миграция с PIN-установки, «users» — вход по логину/паролю; user — текущий вход. */
 export interface AuthStatus {
-  setup: boolean;
+  mode: "open" | "pin" | "users";
   unlocked: boolean;
+  user: { login: string; role: "admin" | "manager" | "viewer" } | null;
 }
 
-/** Ошибка «Требуется вход…» — сигнал, что сессии нет/истекла и нужен экран разблокировки. */
+/** Учётная запись без хэшей — так пользователь приходит с сервера. */
+export interface PublicUser {
+  id: string;
+  login: string;
+  role: "admin" | "manager" | "viewer";
+  createdAt: number;
+}
+
+/** Ошибка «Требуется вход…» — сигнал, что сессии нет/истекла и нужен экран входа. */
 export const isAuthError = (e: unknown): boolean => e instanceof Error && e.message.startsWith("Требуется вход");
 
 /** JSON-запрос к /api/auth/*: same-origin fetch несёт куку сессии автоматически. */
@@ -431,26 +442,58 @@ async function authFetch<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-/** Состояние защиты; опрашивается при старте — экран разблокировки закрывает приложение. */
+/** Состояние входа; опрашивается при старте — экран входа закрывает приложение. */
 export const useAuthStatus = () => useQuery({ queryKey: qk.authStatus, queryFn: () => authFetch<AuthStatus>("/api/auth/status") });
 
-/** Первичное задание PIN (только пока PIN не задан): 200 — кука сессии установлена. */
-export function useSetupPin() {
+/** Вход по логину и паролю (или по PIN в режиме миграции): 200 — кука сессии установлена. */
+export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ pin, pin2 }: { pin: string; pin2: string }) =>
-      authFetch<{ ok: boolean }>("/api/auth/setup", { method: "POST", body: JSON.stringify({ pin, pin2 }) }),
+    mutationFn: ({ login, password, pin }: { login?: string; password?: string; pin?: string }) =>
+      authFetch<{ ok: boolean }>("/api/auth/login", { method: "POST", body: JSON.stringify({ login, password, pin }) }),
     onSuccess: () => void qc.invalidateQueries() // весь кэш: данные перечитываются уже под сессией
   });
 }
 
-/** Разблокировка по PIN: 200 — кука сессии установлена. */
-export function useLoginPin() {
+/** Создание первого администратора (только пока пользователей нет; при миграции нужен старый PIN). */
+export function useBootstrapAdmin() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ pin }: { pin: string }) =>
-      authFetch<{ ok: boolean }>("/api/auth/login", { method: "POST", body: JSON.stringify({ pin }) }),
+    mutationFn: ({ login, password, password2, pin }: { login: string; password: string; password2: string; pin?: string }) =>
+      authFetch<{ ok: boolean }>("/api/auth/bootstrap", { method: "POST", body: JSON.stringify({ login, password, password2, pin }) }),
     onSuccess: () => void qc.invalidateQueries()
+  });
+}
+
+/** Список учётных записей (админ); в открытом режиме — пустой список. */
+export const useUsers = () => useQuery({ queryKey: qk.users, queryFn: () => authFetch<{ users: PublicUser[] }>("/api/auth/users") });
+
+/** Создание пользователя (админ). */
+export function useCreateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ login, password, password2, role }: { login: string; password: string; password2: string; role: string }) =>
+      authFetch<PublicUser>("/api/auth/users", { method: "POST", body: JSON.stringify({ login, password, password2, role }) }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.users })
+  });
+}
+
+/** Смена роли и/или пароля пользователя (админ). */
+export function usePatchUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: { id: string; role?: string; password?: string; password2?: string }) =>
+      authFetch<PublicUser>(`/api/auth/users/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.users })
+  });
+}
+
+/** Удаление пользователя (админ); нельзя себя и последнего администратора. */
+export function useDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => authFetch<{ ok: boolean }>(`/api/auth/users/${id}`, { method: "DELETE" }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.users })
   });
 }
 

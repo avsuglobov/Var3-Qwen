@@ -35,13 +35,14 @@ async function main() {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await ctx.newPage();
     const problems = [], hosts = new Set();
-    // намеренные ошибки сети из сценариев (сбой 503, битый импорт 422, закрытый API 401 этапа 15) браузер пишет в консоль как «Failed to load resource»; это не ошибки приложения
-    page.on("console", (m) => { if (["error", "warning"].includes(m.type()) && !/Failed to load resource.*status of (503|422|401)/.test(m.text())) problems.push(m.type() + ": " + m.text().slice(0, 200)); });
+    // намеренные ошибки сети из сценариев (сбой 503, битый импорт 422, закрытый API 401 этапа 15, отказ по роли 403 этапа 18) браузер пишет в консоль как «Failed to load resource»; это не ошибки приложения
+    page.on("console", (m) => { if (["error", "warning"].includes(m.type()) && !/Failed to load resource.*status of (503|422|401|403)/.test(m.text())) problems.push(m.type() + ": " + m.text().slice(0, 200)); });
     page.on("pageerror", (e) => problems.push("pageerror: " + String(e).slice(0, 200)));
     page.on("request", (r) => { try { hosts.add(new URL(r.url()).host); } catch { /* data: */ } });
 
     const origin = async () => { if (!page.url().startsWith("http")) await page.goto(BASE + "/integrations", { waitUntil: "networkidle" }); };
     const prepare = async (fn, arg) => { await origin(); await page.evaluate(fn, arg); };
+    fs.rmSync(".data/secrets.json", { force: true }); // набор сам управляет блоком auth: стартовать из открытого режима
     const reset = async () => { await apiReset(); await prepare(() => localStorage.clear()); };
     const open = async (url = "/integrations") => {
       const waitSel = { "/integrations": "[data-testid=integrations-card]", "/settings": "[data-testid=settings-tab-profile]", "/help": "[data-testid=help-chat]", "/crm": "[data-testid=crm-sync]" }[url];
@@ -296,41 +297,105 @@ async function main() {
     }
     check("контраст WCAG AA на всех разделах в обеих темах" + (Object.keys(bad2).length ? "\n     " + Object.entries(bad2).slice(0, 5).map(([k, v]) => `${v.ratio} ${k}`).join("\n     ") : ""), Object.keys(bad2).length === 0);
 
-    // ---------- этап 15: защита API — PIN-сессия и экран разблокировки
+    // ---------- этап 18: аккаунты и роли — вход по логину/паролю, миграция с PIN, lockout
     const st0 = await page.evaluate(() => fetch("/api/auth/status").then((r) => r.json()));
-    check("этап 15: без PIN API открыт — статус setup:false/unlocked:true, гейт не показан", st0.setup === false && st0.unlocked === true && (await page.locator("[data-testid=auth-gate]").count()) === 0);
-    const setupRes = await fetch(BASE + "/api/auth/setup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pin: "1555", pin2: "1555" }) });
-    check("этап 15: POST setup создаёт PIN и HttpOnly-куку сессии", setupRes.status === 200 && (setupRes.headers.get("set-cookie") ?? "").includes("HttpOnly"));
-    const setupAgain = await fetch(BASE + "/api/auth/setup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pin: "2666", pin2: "2666" }) });
-    check("этап 15: повторный setup — 409 «уже задан»", setupAgain.status === 409 && JSON.stringify(await setupAgain.json()).includes("уже задан"));
-    const lockedRuns = await fetch(BASE + "/api/integrations/runs");
-    check("этап 15: без сессии /api/* закрыт — 401 «Требуется вход»", lockedRuns.status === 401 && JSON.stringify(await lockedRuns.json()).includes("Требуется вход"));
+    check("этап 18: без блока auth API открыт — режим open/unlocked, гейт не показан", st0.mode === "open" && st0.unlocked === true && (await page.locator("[data-testid=auth-gate]").count()) === 0);
+    // Миграция: имитируем установку этапов 15–17 — secrets.json с PIN-блоком без пользователей
+    const crypto = await import("node:crypto");
+    const pinSalt = "a1b2c3d4e5f60718";
+    const pinHash = crypto.scryptSync("1555", pinSalt, 32).toString("hex");
+    fs.mkdirSync(path.join(process.cwd(), ".data"), { recursive: true });
+    fs.writeFileSync(path.join(process.cwd(), ".data", "secrets.json"), JSON.stringify({ version: 1, credentials: {}, auth: { pinHash, pinSalt, users: [], sessions: [], fails: [] } }), { mode: 0o600 });
+    const stPin = await fetch(BASE + "/api/auth/status").then((r) => r.json());
+    check("этап 18: PIN-блок без пользователей — режим pin, API закрыт (401 без сессии)", stPin.mode === "pin" && stPin.unlocked === false && (await fetch(BASE + "/api/integrations/runs")).status === 401);
     const stBrowser = await page.evaluate(() => fetch("/api/auth/status").then((r) => r.json()));
-    check("этап 15: браузер без куки — unlocked:false (сессия set-cookie не шарится между клиентами)", stBrowser.unlocked === false);
+    check("этап 18: браузер без куки — unlocked:false (сессия set-cookie не шарится между клиентами)", stBrowser.unlocked === false);
     await open("/integrations");
     await page.waitForSelector("[data-testid=auth-gate]", { timeout: 8000 });
-    check("этап 15: перезагрузка — экран блокировки поверх приложения", (await page.locator("[data-testid=auth-gate]").count()) === 1);
+    check("этап 18: миграция — экран входа по PIN поверх приложения", (await page.locator("[data-testid=auth-gate]").count()) === 1 && (await page.locator("[data-testid=auth-pin]").count()) === 1);
     await page.locator("[data-testid=auth-pin]").fill("9999");
     await page.locator("[data-testid=auth-submit]").click();
     await page.waitForSelector("[data-testid=auth-error]", { timeout: 8000 });
-    check("этап 15: неверный PIN — «Неверный PIN», приложение всё ещё закрыто", (await page.locator("[data-testid=auth-error]").innerText()).includes("Неверный PIN") && (await page.locator("[data-testid=auth-gate]").count()) === 1);
+    check("этап 18: неверный PIN — «Неверный PIN», приложение всё ещё закрыто", (await page.locator("[data-testid=auth-error]").innerText()).includes("Неверный PIN") && (await page.locator("[data-testid=auth-gate]").count()) === 1);
     await page.locator("[data-testid=auth-pin]").fill("1555");
     await page.locator("[data-testid=auth-submit]").click();
     await page.waitForFunction(() => !document.querySelector("[data-testid=auth-gate]"), { timeout: 8000 });
-    await page.waitForSelector("[data-testid=integrations-card]", { timeout: 8000 });
-    const stAfter = await page.evaluate(() => fetch("/api/auth/status").then((r) => r.json()));
-    check("этап 15: верный PIN — гейт ушёл, карточки на месте, статус unlocked:true", stAfter.unlocked === true && (await page.locator("[data-testid=integrations-card]").count()) === 8);
+    check("этап 18: верный PIN открывает приложение (миграционная сессия)", (await page.evaluate(() => fetch("/api/integrations/runs").then((r) => r.status))) === 200);
+    // Создание первого администратора: Настройки → Роли → Пользователи и вход
     await open("/settings");
+    await page.locator("[data-testid=settings-tab-roles]").click();
+    await page.waitForSelector("[data-testid=settings-bootstrap]", { timeout: 8000 });
+    check("этап 18: в миграции показана форма первого администратора с полем PIN", (await page.locator("[data-testid=settings-bootstrap-pin]").count()) === 1);
+    await page.locator("[data-testid=settings-bootstrap-pin]").fill("1555");
+    await page.locator("[data-testid=settings-bootstrap-login]").fill("admin");
+    await page.locator("[data-testid=settings-bootstrap-password]").fill("short1");
+    await page.locator("[data-testid=settings-bootstrap-password2]").fill("short1");
+    check("этап 18: кнопка создания админа заблокирована при слабом пароле", await page.locator("[data-testid=settings-bootstrap-submit]").isDisabled());
+    await page.locator("[data-testid=settings-bootstrap-password]").fill("Password123");
+    await page.locator("[data-testid=settings-bootstrap-password2]").fill("Password123");
+    await page.locator("[data-testid=settings-bootstrap-submit]").click();
+    await page.waitForSelector("[data-testid=settings-current-user]", { timeout: 15000 });
+    const stAdmin = await page.evaluate(() => fetch("/api/auth/status").then((r) => r.json()));
+    check("этап 18: админ создан — PIN отключён, сессия сразу админская, гейт не показан", stAdmin.mode === "users" && stAdmin.user?.role === "admin" && (await page.locator("[data-testid=auth-gate]").count()) === 0);
+    const stUsers = await fetch(BASE + "/api/auth/status").then((r) => r.json());
+    check("этап 18: статус перешёл в режим users, вход по PIN больше не работает", stUsers.mode === "users" && (await fetch(BASE + "/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pin: "1555" }) })).status === 401);
+    await page.locator("[data-testid=settings-tab-profile]").click();
     await page.locator("[data-testid=settings-lock-button]").click();
     await page.waitForSelector("[data-testid=auth-gate]", { timeout: 8000 });
-    check("этап 15: «Заблокировать» в Настройках — экран блокировки вернулся", (await page.locator("[data-testid=auth-gate]").count()) === 1);
-    await page.locator("[data-testid=auth-pin]").fill("1555");
+    await page.locator("[data-testid=auth-login]").fill("admin");
+    await page.locator("[data-testid=auth-password]").fill("Wrong999999");
+    await page.locator("[data-testid=auth-submit]").click();
+    await page.waitForSelector("[data-testid=auth-error]", { timeout: 8000 });
+    check("этап 18: неверный пароль — «Неверный логин или пароль»", (await page.locator("[data-testid=auth-error]").innerText()).includes("Неверный логин или пароль"));
+    await page.locator("[data-testid=auth-password]").fill("Password123");
     await page.locator("[data-testid=auth-submit]").click();
     await page.waitForFunction(() => !document.querySelector("[data-testid=auth-gate]"), { timeout: 8000 });
-    check("этап 15: повторная разблокировка — API снова отвечает 200 с сессией", (await page.evaluate(() => fetch("/api/integrations/runs").then((r) => r.status))) === 200);
-    fs.rmSync(".data/secrets.json", { force: true }); // сброс PIN: не оставлять блокировку следующим наборам (a11y)
+    check("этап 18: админ вошёл — запись под админом разрешена, reset и debug доступны", (await page.evaluate(() => fetch("/api/data/reset", { method: "POST" }).then((r) => r.status))) === 200 && (await page.evaluate(() => fetch("/api/debug", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fail: false, latencyMs: 0 }) }).then((r) => r.status))) === 200);
+    // Админ создаёт наблюдателя; проверка ролей
+    const createdViewer = await page.evaluate(() => fetch("/api/auth/users", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ login: "viewer1", password: "Password123", password2: "Password123", role: "viewer" }) }).then((r) => r.status));
+    check("этап 18: админ создаёт пользователя viewer1 (201)", createdViewer === 201);
+    await open("/settings");
+    await page.locator("[data-testid=settings-tab-profile]").click();
+    await page.locator("[data-testid=settings-lock-button]").click();
+    await page.waitForSelector("[data-testid=auth-gate]", { timeout: 8000 });
+    check("этап 18: «Заблокировать» в Настройках — экран входа вернулся", (await page.locator("[data-testid=auth-gate]").count()) === 1);
+    await page.locator("[data-testid=auth-login]").fill("viewer1");
+    await page.locator("[data-testid=auth-password]").fill("Password123");
+    await page.locator("[data-testid=auth-submit]").click();
+    await page.waitForFunction(() => !document.querySelector("[data-testid=auth-gate]"), { timeout: 8000 });
+    const viewerProbes = await page.evaluate(() => Promise.all([
+      fetch("/api/collections/leads").then((r) => r.status),
+      fetch("/api/collections/leads", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).then((r) => r.status),
+      fetch("/api/data/reset", { method: "POST" }).then((r) => r.status),
+      fetch("/api/debug", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).then((r) => r.status),
+      fetch("/api/auth/users").then((r) => r.status)
+    ]));
+    check("этап 18: viewer — чтение 200, запись 403, админ-группа (reset/debug/users) 403", JSON.stringify(viewerProbes) === JSON.stringify([200, 403, 403, 403, 403]));
+    // Lockout: 5 неудач подряд — блокировка на 15 минут
+    await open("/settings");
+    await page.locator("[data-testid=settings-tab-profile]").click();
+    await page.locator("[data-testid=settings-lock-button]").click();
+    await page.waitForSelector("[data-testid=auth-gate]", { timeout: 8000 });
+    let lockMsg = "";
+    for (let i = 0; i < 5; i += 1) {
+      await page.locator("[data-testid=auth-login]").fill("viewer1");
+      await page.locator("[data-testid=auth-password]").fill("Wrong999999");
+      await page.locator("[data-testid=auth-submit]").click();
+      // ответ приходит с задержкой 250 мс — ждём текста именно этой попытки: 1–4 «Неверный…», 5-я — блокировка
+      await page.waitForFunction((locked) => {
+        const t = document.querySelector("[data-testid=auth-error]")?.innerText ?? "";
+        return locked ? t.includes("заблокирован") : t.includes("Неверный логин или пароль");
+      }, i === 4, { timeout: 8000 });
+      lockMsg = await page.locator("[data-testid=auth-error]").innerText();
+    }
+    check("этап 18: после 5 неудач — «Вход временно заблокирован», верный пароль тоже отклоняется", lockMsg.includes("заблокирован"));
+    await page.locator("[data-testid=auth-password]").fill("Password123");
+    await page.locator("[data-testid=auth-submit]").click();
+    await page.waitForFunction(() => (document.querySelector("[data-testid=auth-error]")?.innerText ?? "").includes("Вход временно заблокирован — повторите"), { timeout: 8000 });
+    check("этап 18: верный пароль во время блокировки отклонён", (await page.locator("[data-testid=auth-error]").innerText()).includes("заблокирован"));
+    fs.rmSync(".data/secrets.json", { force: true }); // сброс auth: не оставлять блокировку следующим наборам (a11y)
     const stReset = await fetch(BASE + "/api/auth/status").then((r) => r.json());
-    check("этап 15: сброс secrets.json возвращает открытый режим (совместимость наборов e2e)", stReset.setup === false && stReset.unlocked === true);
+    check("этап 18: сброс secrets.json возвращает открытый режим (совместимость наборов e2e)", stReset.mode === "open" && stReset.unlocked === true);
 
     // этап 16: AI-маршруты — без блока ai честный scripted-fallback; недоступный провайдер — честная 503; ключ только маской
     const stAi0 = await fetch(BASE + "/api/ai/status").then((r) => r.json());

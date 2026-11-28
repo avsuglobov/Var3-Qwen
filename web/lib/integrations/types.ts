@@ -86,18 +86,45 @@ export type SyncCursor = z.infer<typeof syncCursorSchema>;
 export const autoSyncStateSchema = z.object({ enabled: z.boolean() });
 export type AutoSyncState = z.infer<typeof autoSyncStateSchema>;
 
-/** Сессия разблокировки (этап 15): случайный токен HttpOnly-куки и время создания. */
+/** Сессия пользователя (этап 18): случайный токен HttpOnly-куки, чей пользователь и время создания. */
 export const authSessionSchema = z.object({
   token: z.string().min(16).max(128),
+  userId: z.string().min(1).max(64),
   createdAt: z.number().int().positive()
 });
 export type AuthSession = z.infer<typeof authSessionSchema>;
 
-/** Блок защиты API (этап 15): scrypt-хэш PIN, соль и активные сессии; лежит рядом с ключами, вне снимка и экспорта. */
+/** Учётная запись пользователя (этап 18): scrypt-хэш пароля с солью; пароль никогда не хранится и не уходит на клиент. */
+export const userAccountSchema = z.object({
+  id: z.string().min(1).max(64),
+  login: z.string().min(3).max(40),
+  passHash: z.string().min(16).max(200),
+  passSalt: z.string().min(8).max(100),
+  role: z.enum(["admin", "manager", "viewer"]),
+  createdAt: z.number().int().positive()
+});
+export type UserAccount = z.infer<typeof userAccountSchema>;
+
+/** Запись счётчика неудачных входов (этап 18): после 5 неудач подряд логин блокируется на 15 минут. */
+export const authFailSchema = z.object({
+  login: z.string().min(1).max(40),
+  count: z.number().int().min(1),
+  lockedUntil: z.number().int().positive().optional()
+});
+export type AuthFail = z.infer<typeof authFailSchema>;
+
+/**
+ * Блок защиты API (этап 18): учётные записи пользователей, активные сессии и счётчики неудачных
+ * входов; лежит рядом с ключами, вне снимка и экспорта. pinHash/pinSalt остались только от
+ * установок этапов 15–17: пока пользователи не созданы, вход идёт по старому PIN, а после
+ * создания первого админа PIN-хэш удаляется (PIN отключается совсем).
+ */
 export const authBlockSchema = z.object({
-  pinHash: z.string().min(16).max(200),
-  pinSalt: z.string().min(8).max(100),
-  sessions: z.array(authSessionSchema).max(20).default([])
+  pinHash: z.string().min(16).max(200).optional(),
+  pinSalt: z.string().min(8).max(100).optional(),
+  users: z.array(userAccountSchema).max(20).default([]),
+  sessions: z.array(authSessionSchema).max(20).default([]),
+  fails: z.array(authFailSchema).max(50).default([])
 });
 export type AuthBlock = z.infer<typeof authBlockSchema>;
 

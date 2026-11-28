@@ -7,13 +7,13 @@ import { guardApi } from "@/lib/server/auth";
  * corrupt (записать в хранилище битый снимок — приложение восстановит демо-данные).
  */
 export async function GET(req: Request) {
-  const denied = guardApi(req);
+  const denied = guardApi(req, "admin");
   if (denied) return denied;
   return Response.json(getServerStore().getFaults());
 }
 
 export async function POST(req: Request) {
-  const denied = guardApi(req);
+  const denied = guardApi(req, "admin");
   if (denied) return denied;
   try {
     const body = (await readJsonBody(req)) as { fail?: unknown; latencyMs?: unknown; corrupt?: unknown };

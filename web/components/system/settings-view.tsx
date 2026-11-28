@@ -5,7 +5,8 @@ import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { useChannels, useCompanyProfile, useExportData, useImportData, useLogout, useResetData, useSaveCompanyProfile } from "@/lib/api/hooks";
+import { useAuthStatus, useBootstrapAdmin, useChannels, useCompanyProfile, useCreateUser, useDeleteUser, useExportData, useImportData, useLogout, usePatchUser, useResetData, useSaveCompanyProfile, useUsers } from "@/lib/api/hooks";
+import type { PublicUser } from "@/lib/api/hooks";
 import {
   DEFAULT_SETTINGS_TAB,
   DEFAULT_TARIFF,
@@ -19,6 +20,8 @@ import {
 import { cn } from "@/lib/utils";
 import type { CompanyProfile } from "@/lib/schemas";
 
+const FIELD = "h-9 w-full rounded-sm border border-input bg-card px-3 text-sm focus-visible:outline-2 focus-visible:outline-ring";
+
 /**
  * Раздел «Настройки» (этап 3, финальная группа) — поведение settings() прототипа:
  * 7 вкладок (состояние клиента, как AIWS.store.settingsTab), роли и каналы, переключатели
@@ -26,7 +29,8 @@ import type { CompanyProfile } from "@/lib/schemas";
  * экспортом/импортом/сбросом через слой Api. Этап 7: смена тарифа сохраняется в профиле
  * компании; поля профиля и компании — демо-значения без сохранения (как fieldRow прототипа).
  * Этап 15: во вкладке «Профиль» кнопка «Заблокировать» завершает сессию — приложение
- * закрывается экраном разблокировки по PIN.
+ * закрывается экраном входа. Этап 18: во вкладке «Роли» — управление учётными записями
+ * (создание первого администратора, список, роли admin/manager/viewer, удаление).
  */
 export function SettingsView() {
   const [tab, setTab] = useState(DEFAULT_SETTINGS_TAB);
@@ -75,11 +79,11 @@ function ProfileTab() {
       <Field label="Email" value={email} onChange={setEmail} id="settings-email" testId="settings-field-email" />
       <Field label="Часовой пояс" value={tz} onChange={setTz} id="settings-tz" testId="settings-field-tz" />
       <p className="text-[11.5px] text-muted-foreground">Сохранение профиля появится вместе с реальным бэкендом (в прототипе — «скоро»).</p>
-      {/* Этап 15: завершить сессию — приложение закрывается экраном разблокировки по PIN. */}
+      {/* Этап 15→18: завершить сессию — приложение закрывается экраном входа. */}
       <div className="flex items-center justify-between gap-3 rounded-sm border border-input p-3" data-testid="settings-lock">
         <div className="min-w-0">
           <p className="text-sm font-medium">Защита приложения</p>
-          <p className="text-xs text-muted-foreground">Завершить сессию на этом устройстве — до ввода PIN приложение закрыто.</p>
+          <p className="text-xs text-muted-foreground">Завершить сессию на этом устройстве — до входа по логину и паролю приложение закрыто.</p>
         </div>
         <Button variant="secondary" size="sm" disabled={logout.isPending} onClick={() => logout.mutate()} data-testid="settings-lock-button">
           Заблокировать
@@ -122,25 +126,183 @@ function CompanyTab() {
 
 function RolesTab() {
   return (
-    <div className="min-w-0">
-      <div className="section-label mb-3">Роли и доступ</div>
-      <div className="min-w-0 overflow-x-auto">
-        <table className="w-full min-w-[320px] text-left text-sm" data-testid="settings-roles">
-          <thead>
-            <tr className="border-b border-border text-[11px] uppercase tracking-wide text-muted-foreground">
-              <th className="py-2 pr-3 font-medium">Роль</th>
-              <th className="py-2 font-medium">Доступ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ROLE_ACCESS.map((r) => (
-              <tr key={r.role} className="border-b border-border last:border-b-0" data-testid="settings-role-row" data-role={r.role}>
-                <td className="py-2.5 pr-3">{r.role}</td>
-                <td className="py-2.5 text-muted-foreground">{r.access}</td>
+    <div className="min-w-0 space-y-6">
+      <div className="min-w-0">
+        <div className="section-label mb-3">Роли и доступ</div>
+        <div className="min-w-0 overflow-x-auto">
+          <table className="w-full min-w-[320px] text-left text-sm" data-testid="settings-roles">
+            <thead>
+              <tr className="border-b border-border text-[11px] uppercase tracking-wide text-muted-foreground">
+                <th className="py-2 pr-3 font-medium">Роль</th>
+                <th className="py-2 font-medium">Доступ</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {ROLE_ACCESS.map((r) => (
+                <tr key={r.role} className="border-b border-border last:border-b-0" data-testid="settings-role-row" data-role={r.role}>
+                  <td className="py-2.5 pr-3">{r.role}</td>
+                  <td className="py-2.5 text-muted-foreground">{r.access}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <SecurityCard />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------ Пользователи (этап 18) */
+
+/**
+ * Управление учётными записями (этап 18): пока пользователей нет — создание первого
+ * администратора (при миграции с PIN-установки нужен действующий PIN, после чего PIN
+ * отключается); у админа — список пользователей, смена роли/пароля, удаление; прочим
+ * ролям видна только их собственная роль. Сессия — 7 дней, lockout — 5 попыток/15 минут.
+ */
+function SecurityCard() {
+  const status = useAuthStatus();
+  const mode = status.data?.mode;
+  const isAdmin = mode === "open" || status.data?.user?.role === "admin";
+  const usersQ = useUsers();
+  const [feedback, setFeedback] = useState<{ text: string; kind: "status" | "alert" }>({ text: "", kind: "status" });
+
+  return (
+    <div className="min-w-0" data-testid="settings-security">
+      <div className="section-label mb-3">Пользователи и вход</div>
+      {feedback.text ? (
+        <p role={feedback.kind} aria-live="polite" className="mb-3 text-[13px]" data-testid="settings-users-feedback">
+          {feedback.text}
+        </p>
+      ) : null}
+      {mode === "users" && status.data?.user ? (
+        <p className="mb-3 text-[13px] text-muted-foreground" data-testid="settings-current-user">
+          Вы вошли как <b>{status.data.user.login}</b> — роль {status.data.user.role}.
+        </p>
+      ) : null}
+      {mode === "open" || mode === "pin" ? <BootstrapForm onFeedback={(t, k) => setFeedback({ text: t, kind: k })} pinMode={mode === "pin"} /> : null}
+      {isAdmin && mode === "users" ? <UsersAdmin onFeedback={(t, k) => setFeedback({ text: t, kind: k })} /> : null}
+      {usersQ.isError && isAdmin ? (
+        <p role="alert" className="text-[13px] text-destructive">{usersQ.error?.message}</p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Создание первого администратора: с PIN (миграция) или без (свежая установка). */
+function BootstrapForm({ onFeedback, pinMode }: { onFeedback: (t: string, k: "status" | "alert") => void; pinMode: boolean }) {
+  const bootstrap = useBootstrapAdmin();
+  const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
+  const [password2, setPassword2] = useState("");
+  const [pin, setPin] = useState("");
+  const busy = bootstrap.isPending;
+  const submit = (): void =>
+    bootstrap.mutate(
+      pinMode ? { login, password, password2, pin } : { login, password, password2 },
+      {
+        onSuccess: () => onFeedback(`Администратор ${login} создан — вход теперь по логину и паролю`, "status"),
+        onError: (e) => onFeedback(e.message, "alert")
+      }
+    );
+  return (
+    <div className="space-y-3 rounded-sm border border-input p-3" data-testid="settings-bootstrap">
+      <p className="text-[13.5px] font-medium">{pinMode ? "Создайте первого администратора" : "Включить вход по учётным записям"}</p>
+      {pinMode ? (
+        <input className={FIELD} type="password" placeholder="Действующий PIN" aria-label="Действующий PIN" value={pin} onChange={(e) => setPin(e.target.value)} data-testid="settings-bootstrap-pin" />
+      ) : null}
+      <input className={FIELD} type="text" autoComplete="username" placeholder="Логин администратора" aria-label="Логин администратора" value={login} onChange={(e) => setLogin(e.target.value)} data-testid="settings-bootstrap-login" />
+      <input className={FIELD} type="password" autoComplete="new-password" placeholder="Пароль (от 10 знаков, с цифрой)" aria-label="Пароль администратора" value={password} onChange={(e) => setPassword(e.target.value)} data-testid="settings-bootstrap-password" />
+      <input className={FIELD} type="password" autoComplete="new-password" placeholder="Повторите пароль" aria-label="Повторите пароль" value={password2} onChange={(e) => setPassword2(e.target.value)} data-testid="settings-bootstrap-password2" />
+      <Button size="sm" disabled={busy || !login || password.length < 10 || password2 !== password || (pinMode && !pin)} onClick={submit} data-testid="settings-bootstrap-submit">
+        {busy ? "Создаём…" : "Создать администратора"}
+      </Button>
+      <p className="text-[11.5px] text-muted-foreground">
+        {pinMode
+          ? "Верный PIN подтверждает право настроить вход; после создания администратора PIN отключается совсем."
+          : "Пароль от 10 знаков с хотя бы одной цифрой; хранится только scrypt-хэш (.data/secrets.json)."}
+      </p>
+    </div>
+  );
+}
+
+/** Список пользователей админом: смена роли, пароля, удаление; форма создания. */
+function UsersAdmin({ onFeedback }: { onFeedback: (t: string, k: "status" | "alert") => void }) {
+  const usersQ = useUsers();
+  const create = useCreateUser();
+  const patch = usePatchUser();
+  const del = useDeleteUser();
+  const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
+  const [password2, setPassword2] = useState("");
+  const [role, setRole] = useState("viewer");
+
+  const onCreate = (): void =>
+    create.mutate(
+      { login, password, password2, role },
+      {
+        onSuccess: (u) => { onFeedback(`Пользователь ${u.login} создан (роль ${u.role})`, "status"); setLogin(""); setPassword(""); setPassword2(""); setRole("viewer"); },
+        onError: (e) => onFeedback(e.message, "alert")
+      }
+    );
+
+  const onRole = (u: PublicUser, next: string): void =>
+    patch.mutate(
+      { id: u.id, role: next },
+      {
+        onSuccess: (r) => onFeedback(`Роль ${r.login} изменена на ${r.role}; его сессии завершены`, "status"),
+        onError: (e) => onFeedback(e.message, "alert")
+      }
+    );
+
+  const onDelete = (u: PublicUser): void =>
+    del.mutate(u.id, {
+      onSuccess: () => onFeedback(`Пользователь ${u.login} удалён`, "status"),
+      onError: (e) => onFeedback(e.message, "alert")
+    });
+
+  return (
+    <div className="space-y-4">
+      <div className="min-w-0 overflow-x-auto" data-testid="settings-users-list">
+        {(usersQ.data?.users ?? []).map((u) => (
+          <div key={u.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-border py-2 last:border-b-0" data-testid="settings-user-row" data-login={u.login}>
+            <div className="min-w-0">
+              <div className="text-[13.5px] font-medium">{u.login}</div>
+              <div className="text-xs text-muted-foreground">{u.role}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                aria-label={`Роль: ${u.login}`}
+                value={u.role}
+                onChange={(e) => onRole(u, e.target.value)}
+                className="h-8 rounded-sm border border-input bg-card px-2 text-xs focus-visible:outline-2 focus-visible:outline-ring"
+                data-testid="settings-user-role"
+              >
+                <option value="admin">admin</option>
+                <option value="manager">manager</option>
+                <option value="viewer">viewer</option>
+              </select>
+              <Button variant="ghost" size="sm" disabled={del.isPending} onClick={() => onDelete(u)} data-testid="settings-user-delete">
+                Удалить
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="space-y-2 rounded-sm border border-input p-3" data-testid="settings-user-create">
+        <p className="text-[13.5px] font-medium">Новый пользователь</p>
+        <input className={FIELD} type="text" placeholder="Логин" aria-label="Логин нового пользователя" value={login} onChange={(e) => setLogin(e.target.value)} data-testid="settings-user-login" />
+        <input className={FIELD} type="password" autoComplete="new-password" placeholder="Пароль (от 10 знаков, с цифрой)" aria-label="Пароль нового пользователя" value={password} onChange={(e) => setPassword(e.target.value)} data-testid="settings-user-password" />
+        <input className={FIELD} type="password" autoComplete="new-password" placeholder="Повторите пароль" aria-label="Повторите пароль нового пользователя" value={password2} onChange={(e) => setPassword2(e.target.value)} data-testid="settings-user-password2" />
+        <select aria-label="Роль нового пользователя" value={role} onChange={(e) => setRole(e.target.value)} className={FIELD} data-testid="settings-user-role-new">
+          <option value="admin">admin</option>
+          <option value="manager">manager</option>
+          <option value="viewer">viewer</option>
+        </select>
+        <Button size="sm" disabled={create.isPending || !login || password.length < 10 || password2 !== password} onClick={onCreate} data-testid="settings-user-create-button">
+          {create.isPending ? "Создаём…" : "Создать пользователя"}
+        </Button>
       </div>
     </div>
   );
