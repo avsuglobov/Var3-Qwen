@@ -1,4 +1,3 @@
-import path from "node:path";
 import { FAIL_FLAG_KEY, LATENCY_KEY, createLocalApi } from "@/lib/api/local-adapter";
 import { ApiError, type Api, type ApiErrorCode, type StorageLike } from "@/lib/api/types";
 import { createStorageDriver, type StorageDriver } from "@/lib/server/storage";

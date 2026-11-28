@@ -197,5 +197,20 @@ describe.each([
       expect(await res.json()).toEqual(SEED_DATA.LEADS);
       expect(storedSnapshot()["LEADS"]).toEqual(SEED_DATA.LEADS);
     });
+
+    it("debug: без AIWS_DEBUG=1 маршрут выключен — 404 на GET и POST (прод-режим, этап 19)", async () => {
+      delete process.env.AIWS_DEBUG;
+      try {
+        const get = await debugGet(new Request("http://x/api/debug"));
+        expect(get.status).toBe(404);
+        expect(((await get.json()) as { message: string }).message).toBe("Не найдено");
+        expect((await debugPost(jsonRequest("http://x/api/debug", "POST", { fail: true }))).status).toBe(404);
+        // хранилище не задето: данные читаются как обычно
+        const res = await listRoute(new Request("http://x/api/collections/leads"), colCtx("leads"));
+        expect(res.status).toBe(200);
+      } finally {
+        process.env.AIWS_DEBUG = "1"; // остальные тесты ожидают включённую панель
+      }
+    });
   });
 });

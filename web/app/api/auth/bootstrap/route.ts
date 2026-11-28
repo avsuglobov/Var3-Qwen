@@ -1,7 +1,7 @@
 import { ApiError } from "@/lib/api/types";
-import { createSession, createUser, sessionCookieHeaders, validateLogin, validatePassword, validatePin, verifySecret } from "@/lib/server/auth";
+import { createSession, createUser, sessionCookieHeaders, validateLogin, validatePassword, verifySecret } from "@/lib/server/auth";
 import { errorResponse, readJsonBody } from "@/lib/server/store";
-import { readAuthBlock, writeAuthBlock } from "@/lib/server/secrets";
+import { readAuthBlock } from "@/lib/server/secrets";
 
 /**
  * POST /api/auth/bootstrap — создание первого администратора; работает только пока пользователей
