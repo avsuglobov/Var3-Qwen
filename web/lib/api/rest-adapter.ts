@@ -104,6 +104,7 @@ export function createRestApi(options: RestApiOptions = {}): Api {
       }
     },
     certificates: repo<'CERTIFICATES'>(base, "certificates"),
+    emails: repo<'EMAILS'>(base, "emails"),
     companyProfile: {
       async get() {
         return json<CompanyProfile>(`${base}/api/company-profile`);

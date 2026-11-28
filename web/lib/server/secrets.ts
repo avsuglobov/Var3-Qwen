@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { credentialsFileSchema, type AiBlock, type AuthBlock, type CredentialsFile, type NotificationsBlock } from "@/lib/integrations/types";
+import { credentialsFileSchema, type AiBlock, type AuthBlock, type CredentialsFile, type MailBlock, type NotificationsBlock } from "@/lib/integrations/types";
 
 /**
  * Хранилище ключей внешних сервисов (этап 8): файл `.data/secrets.json` рядом со снимком,
@@ -100,6 +100,21 @@ export function writeNotificationsBlock(notifications: NotificationsBlock): void
 export function writeAuthBlock(auth: AuthBlock): void {
   const file = readCredentials();
   file.auth = auth;
+  writeCredentials(file);
+}
+
+/**
+ * Блок почтового канала (этап 21): учётные записи IMAP/SMTP, интервал опроса, курсоры папок.
+ * Блока нет — канал не настроен: вкладка «Почта» пуста, опрос не выполняется.
+ */
+export function readMailBlock(): MailBlock | null {
+  return readCredentials().mail ?? null;
+}
+
+/** Атомарно сохраняет блок почтового канала целиком (маршруты /api/mail/*, планировщик). */
+export function writeMailBlock(mail: MailBlock): void {
+  const file = readCredentials();
+  file.mail = mail;
   writeCredentials(file);
 }
 

@@ -55,6 +55,8 @@ export interface Api {
   agents: Repository<"AGENTS">;
   courses: CourseRepository;
   certificates: Repository<"CERTIFICATES">;
+  /** Входящие письма почтовых каналов (этап 21): создание — только на сервере (загрузчик IMAP), клиенту доступен список и правка статуса/лида. */
+  emails: Repository<"EMAILS">;
   companyProfile: {
     get(): Promise<CompanyProfile>;
     update(patch: Partial<CompanyProfile>): Promise<CompanyProfile>;

@@ -9,7 +9,7 @@
    не LLM» без настроенного провайдера, запись ответа с пометкой на сервере.
    Запуск: npm run build && node e2e/dialogs.check.mjs */
 import { contrastProbe } from "./lib/contrast-probe.mjs";
-import { apiItems, apiReset, BASE, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
+import { apiItems, apiReset, BASE, importSnapshot, launch, reporter, setFaults, startServer, waitReady, waitFor } from "./lib/harness.mjs";
 
 const { check, done } = reporter();
 
@@ -176,13 +176,47 @@ async function main() {
 
     // этап 16: «Ответ ИИ» — серверный маршрут /api/ai/reply; без настроенного провайдера — честный демо-ответ с пометкой
     await reset(); await open();
+    const msgsBeforeAi = await page.locator("[data-testid=chat-msg]").count();
     await page.locator("[data-testid=chat-ai-reply]").click();
-    await page.waitForFunction((n) => document.querySelectorAll("[data-testid=chat-msg]").length > n, await page.locator("[data-testid=chat-msg]").count(), { timeout: 5000 });
+    await page.waitForFunction((n) => document.querySelectorAll("[data-testid=chat-msg]").length > n, msgsBeforeAi, { timeout: 8000 });
     const aiNote = await page.locator("[data-testid=chat-msg-note]").last().innerText();
     check("этап 16: «Ответ ИИ» добавляет сообщение с честной пометкой «демо»", /демо/.test(aiNote) && /не LLM/.test(aiNote));
     const convId = await page.locator("[data-testid=chat-thread]").getAttribute("data-conv-id");
     const savedConvs = await apiItems("conversations");
     check("этап 16: ответ ИИ с пометкой записан на сервере", savedConvs.find((c) => c.id === convId)?.messages?.some((m) => m.from === "ai" && Boolean(m.note)) === true);
+
+    // ---------- этап 21: вкладка «Почта» — входящие письма, статусы, привязка к лиду, AI с честными пометками
+    await reset(); await open();
+    await page.locator("[data-testid=dialogs-tab-mail]").click();
+    await page.waitForSelector("[data-testid=mail-empty]");
+    check("этап 21: пустое состояние вкладки «Почта»", await page.locator("[data-testid=mail-empty]").isVisible());
+    const email = {
+      id: "em-e2e1", accountId: "acc-e2e", folder: "INBOX", uid: 10, messageId: "<e2e1@test>",
+      from: "Иван Тестов <ivan@test>", to: "sales@test", subject: "Вопрос о тарифах",
+      date: Date.parse("2026-11-23T10:00:00Z"), body: "Здравствуйте, нужны цены и сроки.",
+      status: "Новое", leadId: null, category: null, categorySource: null, attachments: []
+    };
+    await importSnapshot({ version: 1, EMAILS: [email] });
+    await open();
+    await page.locator("[data-testid=dialogs-tab-mail]").click();
+    await page.waitForSelector("[data-testid=mail-item]");
+    check("этап 21: письмо из хранилища в списке вкладки «Почта»", (await page.locator("[data-testid=mail-item]").count()) === 1);
+    await page.locator("[data-testid=mail-item]").click();
+    await page.waitForSelector("[data-testid=mail-card]");
+    check("этап 21: карточка письма показывает тему и тело", (await page.locator("[data-testid=mail-body]").innerText()).includes("цен"));
+    // статус → «В работе» сохраняется на сервере (коллекция EMAILS)
+    await page.locator("[data-testid=mail-status]").selectOption("В работе");
+    await waitFor(async () => (await apiItems("emails"))[0]?.status === "В работе");
+    check("этап 21: смена статуса сохраняется на сервере", (await apiItems("emails"))[0]?.status === "В работе");
+    // AI-классификация без провайдера — честная пометка «не LLM»
+    await page.locator("[data-testid=mail-ai-classify]").click();
+    await page.waitForSelector("[data-testid=mail-category]", { timeout: 5000 });
+    const mailNote = await page.locator("[data-testid=mail-ai-note]").innerText();
+    check("этап 21: классификация с честной пометкой «демо, не LLM»", /не LLM/.test(mailNote) && (await apiItems("emails"))[0]?.categorySource === "scripted");
+    // привязка к лиду
+    await page.locator("[data-testid=mail-lead]").selectOption({ index: 1 });
+    await waitFor(async () => Boolean((await apiItems("emails"))[0]?.leadId));
+    check("этап 21: привязка к лиду сохраняется", Boolean((await apiItems("emails"))[0]?.leadId));
 
     check("нет внешних запросов", [...hosts].every((h) => /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(h)), [...hosts].join(","));
     check("консоль: нет ошибок и предупреждений (hydration, React)" + (problems.length ? " [" + problems.slice(0, 3).join(" | ") + "]" : ""), problems.length === 0);

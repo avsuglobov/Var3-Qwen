@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { useAuthStatus, useBootstrapAdmin, useChannels, useCompanyProfile, useCreateUser, useDeleteUser, useExportData, useImportData, useLogout, useNotifySettings, usePatchUser, useResetData, useSaveCompanyProfile, useSaveSmtp, useSetNotifyToggle, useTestNotification, useUsers } from "@/lib/api/hooks";
 import type { PublicUser } from "@/lib/api/hooks";
+import { MailSettingsTab } from "@/components/system/mail-settings-tab";
 import {
   DEFAULT_SETTINGS_TAB,
   DEFAULT_TARIFF,
@@ -60,7 +61,7 @@ export function SettingsView() {
       </div>
 
       <Card className="max-w-[640px]">
-        <CardContent>{tab === "profile" ? <ProfileTab /> : tab === "company" ? <CompanyTab /> : tab === "roles" ? <RolesTab /> : tab === "channels" ? <ChannelsTab channelsQ={channelsQ} /> : tab === "notifications" ? <NotificationsTab /> : tab === "tariff" ? <TariffTab profileQ={profileQ} /> : <DataTab />}</CardContent>
+        <CardContent>{tab === "profile" ? <ProfileTab /> : tab === "company" ? <CompanyTab /> : tab === "roles" ? <RolesTab /> : tab === "channels" ? <ChannelsTab channelsQ={channelsQ} /> : tab === "notifications" ? <NotificationsTab /> : tab === "mail" ? <MailSettingsTab /> : tab === "tariff" ? <TariffTab profileQ={profileQ} /> : <DataTab />}</CardContent>
       </Card>
     </div>
   );

@@ -159,6 +159,7 @@ export function createLocalApi(options: LocalApiOptions = {}): Api {
       }
     },
     certificates: repo("CERTIFICATES"),
+    emails: repo("EMAILS"),
     companyProfile: {
       async get() { await guard(); return clone((load() as unknown as Record<"COMPANY_PROFILE", CompanyProfile>).COMPANY_PROFILE); },
       async update(patch) {

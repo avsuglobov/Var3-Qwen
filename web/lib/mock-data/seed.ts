@@ -654,6 +654,7 @@ export const SEED_DATA: DbSnapshot = {
       "date": "Демо · 2026-11-01"
     }
   ],
+  "EMAILS": [],
   "COMPANY_PROFILE": {
     "name": "Демо-компания",
     "about": "Демо-описание деятельности для контекста AI-сотрудников.",

@@ -28,7 +28,8 @@ export function blobRefId(data: string): string {
 }
 
 type ConversationLike = { messages?: Array<{ attachments?: Array<{ data?: string }> | null }> };
-type SnapshotLike = { CONVERSATIONS?: unknown };
+type EmailLike = { attachments?: Array<{ data?: string }> | null };
+type SnapshotLike = { CONVERSATIONS?: unknown; EMAILS?: unknown };
 
 export interface ExtractResult {
   /** Снимок с заменёнными ссылками (та же строка, если вложений нет). */
@@ -39,42 +40,50 @@ export interface ExtractResult {
 
 /**
  * Внутрь: base64 → `blob:<id>`, байты через putBlob. Некорректный base64 или уже-ссылка остаются как есть.
- * Строка без `"CONVERSATIONS"` (fault-флаги, прочие ключи) возвращается без изменений.
+ * Строка без "CONVERSATIONS" и "EMAILS" (fault-флаги, прочие ключи) возвращается без изменений.
+ * Этап 21: обрабатываются и вложения диалогов (messages[].attachments), и вложения писем (attachments).
  */
 export function extractBlobs(snapshot: string, putBlob: (id: string, bytes: Buffer) => void): ExtractResult {
   const refs = new Set<string>();
-  if (!snapshot.includes('"CONVERSATIONS"')) return { snapshot, refs };
+  if (!snapshot.includes('"CONVERSATIONS"') && !snapshot.includes('"EMAILS"')) return { snapshot, refs };
   let parsed: SnapshotLike;
   try {
     parsed = JSON.parse(snapshot) as SnapshotLike;
   } catch {
     return { snapshot, refs };
   }
-  if (!Array.isArray(parsed.CONVERSATIONS)) return { snapshot, refs };
   let changed = false;
-  for (const conv of parsed.CONVERSATIONS as ConversationLike[]) {
-    for (const msg of conv?.messages ?? []) {
-      for (const att of msg?.attachments ?? []) {
-        const data = att?.data;
-        if (!data) continue;
-        if (isBlobRef(data)) {
-          refs.add(blobRefId(data));
-          continue;
-        }
-        const bytes = Buffer.from(data, "base64");
-        if (bytes.length === 0) continue;
-        const id = blobId(bytes);
-        putBlob(id, bytes);
-        att.data = BLOB_PREFIX + id;
-        refs.add(id);
-        changed = true;
+  const put = (att: { data?: string } | null | undefined): void => {
+    const data = att?.data;
+    if (!data) return;
+    if (isBlobRef(data)) {
+      refs.add(blobRefId(data));
+      return;
+    }
+    const bytes = Buffer.from(data, "base64");
+    if (bytes.length === 0) return;
+    const id = blobId(bytes);
+    putBlob(id, bytes);
+    att.data = BLOB_PREFIX + id;
+    refs.add(id);
+    changed = true;
+  };
+  if (Array.isArray(parsed.CONVERSATIONS)) {
+    for (const conv of parsed.CONVERSATIONS as ConversationLike[]) {
+      for (const msg of conv?.messages ?? []) {
+        for (const att of msg?.attachments ?? []) put(att);
       }
+    }
+  }
+  if (Array.isArray(parsed.EMAILS)) {
+    for (const mail of parsed.EMAILS as EmailLike[]) {
+      for (const att of mail?.attachments ?? []) put(att);
     }
   }
   return { snapshot: changed ? JSON.stringify(parsed) : snapshot, refs };
 }
 
-/** Наружу: `blob:<id>` → base64 (через getBlob); blob недоступен — поле data убирается. */
+/** Наружу: `blob:<id>` → base64 (через getBlob); blob недоступен — поле data убирается. Этап 21: письма обрабатываются наравне с диалогами. */
 export function hydrateBlobs(stored: string, getBlob: (id: string) => Buffer | null): string {
   if (!stored.includes(BLOB_PREFIX)) return stored;
   let parsed: SnapshotLike;
@@ -83,22 +92,28 @@ export function hydrateBlobs(stored: string, getBlob: (id: string) => Buffer | n
   } catch {
     return stored;
   }
-  if (!Array.isArray(parsed.CONVERSATIONS)) return stored;
   let changed = false;
-  for (const conv of parsed.CONVERSATIONS as ConversationLike[]) {
-    for (const msg of conv?.messages ?? []) {
-      for (const att of msg?.attachments ?? []) {
-        const data = att?.data;
-        if (!data || !isBlobRef(data)) continue;
-        const bytes = getBlob(blobRefId(data));
-        if (bytes) {
-          att.data = bytes.toString("base64");
-          changed = true;
-        } else {
-          delete att.data; // повреждённое blob-хранилище не должно ломать всю переписку
-          changed = true;
-        }
+  const hydrate = (att: { data?: string } | null | undefined): void => {
+    const data = att?.data;
+    if (!data || !isBlobRef(data)) return;
+    const bytes = getBlob(blobRefId(data));
+    if (bytes) {
+      att.data = bytes.toString("base64");
+    } else {
+      delete att.data; // повреждённое blob-хранилище не должно ломать всю переписку
+    }
+    changed = true;
+  };
+  if (Array.isArray(parsed.CONVERSATIONS)) {
+    for (const conv of parsed.CONVERSATIONS as ConversationLike[]) {
+      for (const msg of conv?.messages ?? []) {
+        for (const att of msg?.attachments ?? []) hydrate(att);
       }
+    }
+  }
+  if (Array.isArray(parsed.EMAILS)) {
+    for (const mail of parsed.EMAILS as EmailLike[]) {
+      for (const att of mail?.attachments ?? []) hydrate(att);
     }
   }
   return changed ? JSON.stringify(parsed) : stored;
